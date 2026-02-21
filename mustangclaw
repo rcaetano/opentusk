@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── Resolve repo root ─────────────────────────────────────────────────────
+MUSTANGCLAW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$MUSTANGCLAW_ROOT/scripts/config.sh"
+
+# ─── Help ───────────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: mustangclaw <command> [options]
+
+Commands:
+  init      Configure MustangClaw (interactive wizard) [--reset]
+  build     Clone repo & build Docker image          [--no-pull]
+  run       Run gateway locally                      [--rebuild] [--logs] [--stop]
+  tui       Launch interactive TUI client
+  setup     Run OpenClaw interactive setup wizard
+  deploy    Create & provision DO droplet             [--dry-run] [--force]
+  destroy   Tear down DO droplet                      [--force]
+  sync      Sync ~/.mustangclaw config               [--target local|remote] [--ip IP] [--dry-run]
+  upgrade   Upgrade MustangClaw in-place             [--target local|remote] [--ip IP] [--rollback]
+  ssh       SSH into droplet                          [--tunnel] [--ip IP]
+  status    Show local container & remote droplet status
+
+Run 'mustangclaw <command> --help' for details on a specific command.
+EOF
+    exit 0
+}
+
+# ─── Docker CLI helper ────────────────────────────────────────────────────
+# Run an openclaw CLI command in a container attached to the gateway's network.
+# Falls back to the default compose network if the gateway isn't running.
+run_cli() {
+    require_cmd docker
+    cd "$PROJECT_ROOT"
+    if [[ ! -f "$MUSTANGCLAW_DIR/.env" ]]; then
+        log_error "No .env found. Run 'mustangclaw run' first to start the gateway."
+        exit 1
+    fi
+    source "$MUSTANGCLAW_DIR/.env"
+    local network_flag=()
+    local gw_container
+    gw_container=$(docker ps --filter "name=openclaw-gateway" --filter "status=running" --format '{{.Names}}' | head -1)
+    if [[ -n "$gw_container" ]]; then
+        network_flag=(--network "container:$gw_container")
+    fi
+    docker run --rm -it \
+        ${network_flag[@]+"${network_flag[@]}"} \
+        -e HOME=/home/node \
+        -e TERM=xterm-256color \
+        -e OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN}" \
+        -v "${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw" \
+        -v "${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace" \
+        "$MUSTANGCLAW_IMAGE" \
+        node dist/index.js "$@"
+}
+
+# ─── TUI (inline) ─────────────────────────────────────────────────────────
+cmd_tui() {
+    run_cli tui "$@"
+}
+
+# ─── Status (inline) ───────────────────────────────────────────────────────
+cmd_status() {
+    printf "${_CYAN}── Local Container ──${_NC}\n"
+    if command -v docker &>/dev/null; then
+        local running
+        running=$(docker ps --filter "name=openclaw-gateway" --format '{{.Names}}  {{.Status}}  {{.Ports}}' 2>/dev/null || true)
+        if [[ -n "$running" ]]; then
+            printf "${_GREEN}Running${_NC}  %s\n" "$running"
+        else
+            printf "${_YELLOW}Not running${_NC}\n"
+        fi
+    else
+        printf "${_YELLOW}docker not found${_NC}\n"
+    fi
+
+    echo ""
+    printf "${_CYAN}── Remote Droplet ──${_NC}\n"
+    if command -v doctl &>/dev/null; then
+        local droplet
+        droplet=$(doctl compute droplet list --tag-name "$DO_TAG" \
+            --format Name,PublicIPv4,Status,Memory --no-header 2>/dev/null || true)
+        if [[ -n "$droplet" ]]; then
+            printf "${_GREEN}Found${_NC}  %s\n" "$droplet"
+        else
+            printf "${_YELLOW}No droplet with tag '%s'${_NC}\n" "$DO_TAG"
+        fi
+    else
+        printf "${_YELLOW}doctl not installed — skipping remote check${_NC}\n"
+    fi
+}
+
+# ─── Dispatch ──────────────────────────────────────────────────────────────
+COMMAND="${1:-help}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    init)    exec "$MUSTANGCLAW_ROOT/scripts/init.sh"        "$@" ;;
+    build)   exec "$MUSTANGCLAW_ROOT/scripts/build.sh"       "$@" ;;
+    run)     exec "$MUSTANGCLAW_ROOT/scripts/run-local.sh"    "$@" ;;
+    tui)     cmd_tui "$@" ;;
+    setup)   run_cli configure "$@" ;;
+    deploy)  exec "$MUSTANGCLAW_ROOT/scripts/deploy-do.sh"    "$@" ;;
+    destroy) exec "$MUSTANGCLAW_ROOT/scripts/destroy-do.sh"   "$@" ;;
+    sync)    exec "$MUSTANGCLAW_ROOT/scripts/sync-config.sh"  "$@" ;;
+    upgrade) exec "$MUSTANGCLAW_ROOT/scripts/upgrade.sh"      "$@" ;;
+    ssh)     exec "$MUSTANGCLAW_ROOT/scripts/ssh-do.sh"       "$@" ;;
+    status)  cmd_status ;;
+    help|--help|-h) usage ;;
+    *)
+        log_error "Unknown command: $COMMAND"
+        echo ""
+        usage
+        ;;
+esac
