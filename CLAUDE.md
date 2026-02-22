@@ -9,7 +9,9 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 ./mustangclaw build     # clone openclaw repo & build Docker image (mustangclaw:local)
 ./mustangclaw run       # start gateway container locally
 ./mustangclaw setup     # run OpenClaw's onboarding wizard (API keys, models, auth)
+./mustangclaw dashboard # open OpenClaw Control in browser (auto-approves device pairing)
 ./mustangclaw tui       # launch TUI client (gateway must be running)
+./mustangclaw token     # print the gateway token (for scripts or manual use)
 ./mustangclaw status    # show local container & remote droplet status
 ./mustangclaw status --health  # include application-level gateway health check
 ./mustangclaw run --stop  # stop the gateway
@@ -26,6 +28,7 @@ scripts/
   run-local.sh           # docker compose up (seeds openclaw.json, patches for Docker)
   docker-entrypoint.sh   # container entrypoint — patches openclaw.json on every start
   sandbox-build.sh       # build sandbox images for agent tool isolation
+  rotate-tokens.sh       # rotate device tokens with full scope set
   deploy-do.sh           # provision DigitalOcean droplet
   destroy-do.sh          # tear down droplet
   sync-config.sh         # rsync ~/.mustangclaw to local container or remote
@@ -59,7 +62,9 @@ Key variables from `scripts/config.sh`:
 - `mustangclaw run` patches `openclaw.json` on each start: sets `gateway.bind=lan` and removes `tailscale` config (these conflict with Docker networking)
 - A `docker-compose.override.yml` is generated to mount `scripts/docker-entrypoint.sh` as the container entrypoint — this re-applies the same patch on every container restart, preventing the setup wizard's hot-reload from re-introducing incompatible config
 - `mustangclaw tui` shares the gateway container's network namespace (`--network container:`) so `127.0.0.1` reaches the gateway (required by OpenClaw's loopback security check)
-- The gateway token is read from `openclaw.json` (set by `mustangclaw setup`) to stay in sync
+- The gateway token (`OPENCLAW_GATEWAY_TOKEN`) is the API/device pairing token stored in `openclaw/.env` and passed to the container as an env var. This is separate from user-facing auth in `openclaw.json` (which may use `auth.mode: "password"` or `auth.mode: "token"`). `mustangclaw run` resolves the token from `openclaw.json` first, then `.env`, then generates a new one
+- Browser devices connecting to the dashboard must be **paired** (approved). `mustangclaw dashboard` handles this automatically. Device pairings are stored in `~/.mustangclaw/devices/` and go stale on gateway restarts
+- The dashboard URL uses a **hash fragment** (`/#token=...`), not a query parameter
 
 ## Build Options
 
@@ -124,8 +129,12 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 
 - **Gateway crash-loop with "Missing config"**: Run `mustangclaw run` — it seeds `openclaw.json` if missing
 - **Gateway crash-loop with "tailscale serve/funnel requires bind=loopback"**: Run `mustangclaw run` — it auto-patches this
-- **TUI "device token mismatch"**: Clear `~/.mustangclaw/devices/` and restart gateway
+- **Dashboard "pairing required"**: Run `mustangclaw dashboard` — it auto-approves device pairing. If it persists, clear browser localStorage for `localhost:18789` and retry
+- **Dashboard "device token mismatch"**: Clear `~/.mustangclaw/devices/`, restart gateway (`mustangclaw run --stop && mustangclaw run`), and clear browser localStorage for `localhost:18789`
+- **Dashboard "gateway token missing"**: The token wasn't passed via the URL. Use `mustangclaw dashboard` or paste the token (from `mustangclaw token`) into Control UI settings
+- **TUI "device token mismatch"**: `mustangclaw tui` auto-clears device tokens; if it persists, run `mustangclaw run --stop && mustangclaw run`
 - **TUI "gateway not connected"**: Ensure gateway is running (`mustangclaw status`), then clear `~/.mustangclaw/devices/` and retry
+- **"session file locked" in dashboard chat**: Stale lock file from unclean shutdown. Remove it: `docker exec mustangclaw rm /home/node/.openclaw/agents/main/sessions/*.lock`
 - **Token mismatch between .env and openclaw.json**: `mustangclaw run` reads the token from `openclaw.json` to keep them aligned
 - **Gateway unhealthy but container running**: Run `mustangclaw status --health` to check application-level health
 
