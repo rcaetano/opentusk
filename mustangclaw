@@ -181,25 +181,64 @@ except: pass
 
 # ─── Dashboard (inline) ──────────────────────────────────────────────────
 cmd_dashboard() {
-    local token
-    token=$(cmd_token)
+    # Clear stale device tokens to prevent "device token mismatch" errors.
+    rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"* 2>/dev/null || true
 
-    local url="http://localhost:${GATEWAY_PORT}?token=${token}"
-    log_info "Opening dashboard: $url"
+    require_cmd docker
+
+    local gw_container
+    gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
+    if [[ -z "$gw_container" ]]; then
+        log_error "Gateway container is not running. Start it with 'mustangclaw run'."
+        exit 1
+    fi
+
+    # Get a fresh dashboard link from the gateway CLI (includes pairing token).
+    local dash_url=""
+    dash_url=$(docker exec "$gw_container" node dist/index.js dashboard --no-open 2>&1 \
+        | grep -oE 'https?://[^ ]+' | head -1 || true)
+
+    # Fall back to constructing the URL with hash-fragment token
+    if [[ -z "$dash_url" ]]; then
+        local token
+        token=$(cmd_token)
+        dash_url="http://localhost:${GATEWAY_PORT}/#token=${token}"
+    fi
+
+    log_info "Opening dashboard: $dash_url"
+
+    # Auto-approve pending device requests in the background after a short
+    # delay — gives the browser time to connect and register its device.
+    (
+        sleep 4
+        # Approve all pending device requests
+        local pending
+        pending=$(docker exec "$gw_container" node dist/index.js devices list 2>&1 \
+            | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
+        if [[ -n "$pending" ]]; then
+            while IFS= read -r req_id; do
+                docker exec "$gw_container" node dist/index.js devices approve "$req_id" >/dev/null 2>&1 || true
+            done <<< "$pending"
+            log_info "Auto-approved pending device(s)."
+        fi
+    ) &
 
     # macOS
     if command -v open &>/dev/null; then
-        open "$url"
+        open "$dash_url"
     # Linux (xdg)
     elif command -v xdg-open &>/dev/null; then
-        xdg-open "$url"
+        xdg-open "$dash_url"
     # WSL
     elif command -v wslview &>/dev/null; then
-        wslview "$url"
+        wslview "$dash_url"
     else
         log_warn "Could not detect a browser opener. Open this URL manually:"
-        echo "$url"
+        echo "$dash_url"
     fi
+
+    log_info "Waiting a few seconds to auto-approve browser device pairing..."
+    wait
 }
 
 # ─── Status (inline) ───────────────────────────────────────────────────────
