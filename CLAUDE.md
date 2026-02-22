@@ -12,6 +12,8 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 ./mustangclaw dashboard # open OpenClaw Control in browser (auto-approves device pairing)
 ./mustangclaw tui       # launch TUI client (gateway must be running)
 ./mustangclaw token     # print the gateway token (for scripts or manual use)
+./mustangclaw restart   # restart the gateway container
+./mustangclaw logs      # tail gateway container logs (--lines N)
 ./mustangclaw status    # show local container & remote droplet status
 ./mustangclaw status --health  # include application-level gateway health check
 ./mustangclaw run --stop  # stop the gateway

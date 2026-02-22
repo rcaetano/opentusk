@@ -31,6 +31,8 @@ After setup, run `mustangclaw dashboard` to open OpenClaw Control. It auto-appro
 | `mustangclaw dashboard` | Open OpenClaw Control in browser (auto-approves device pairing) |
 | `mustangclaw tui` | Launch interactive TUI client |
 | `mustangclaw token` | Print the current gateway token |
+| `mustangclaw restart` | Restart the gateway container |
+| `mustangclaw logs` | Tail gateway container logs (`--lines N`) |
 | `mustangclaw status` | Show container & droplet status |
 | `mustangclaw sandbox` | Build sandbox images for agent isolation |
 | `mustangclaw docker` | Open a shell inside the gateway container |
