@@ -22,6 +22,8 @@ Commands:
   upgrade   Upgrade MustangClaw in-place             [--target local|remote] [--ip IP] [--rollback]
   ssh       SSH into droplet                          [--tunnel] [--ip IP]
   sandbox   Build sandbox images for agent isolation    [--browser] [--common] [--all]
+  token     Show the current gateway token
+  dashboard Open OpenClaw Control in the browser (with token)
   docker    Open a shell inside the gateway container
   rotate-tokens  Rotate all device tokens with full scope set (2026.2.19 fix)
   status    Show local container & remote droplet status  [--health]
@@ -136,6 +138,70 @@ cmd_tui() {
     run_cli tui "$@"
 }
 
+# ─── Token (inline) ────────────────────────────────────────────────────────
+cmd_token() {
+    local token=""
+
+    # 1. Try openclaw.json (source of truth)
+    local openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+    if [[ -f "$openclaw_json" ]]; then
+        token=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
+except: pass
+" "$openclaw_json" 2>/dev/null || true)
+    fi
+
+    # 2. Fall back to .env
+    if [[ -z "$token" ]]; then
+        local env_file="$MUSTANGCLAW_DIR/.env"
+        if [[ -f "$env_file" ]]; then
+            token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
+        fi
+    fi
+
+    # 3. Try reading from the running container's environment
+    if [[ -z "$token" ]] && command -v docker &>/dev/null; then
+        local gw_container
+        gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
+        if [[ -n "$gw_container" ]]; then
+            token=$(docker exec "$gw_container" printenv OPENCLAW_GATEWAY_TOKEN 2>/dev/null || true)
+        fi
+    fi
+
+    if [[ -n "$token" ]]; then
+        echo "$token"
+    else
+        log_error "No gateway token found. Run 'mustangclaw run' or 'mustangclaw setup' first."
+        exit 1
+    fi
+}
+
+# ─── Dashboard (inline) ──────────────────────────────────────────────────
+cmd_dashboard() {
+    local token
+    token=$(cmd_token)
+
+    local url="http://localhost:${GATEWAY_PORT}?token=${token}"
+    log_info "Opening dashboard: $url"
+
+    # macOS
+    if command -v open &>/dev/null; then
+        open "$url"
+    # Linux (xdg)
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "$url"
+    # WSL
+    elif command -v wslview &>/dev/null; then
+        wslview "$url"
+    else
+        log_warn "Could not detect a browser opener. Open this URL manually:"
+        echo "$url"
+    fi
+}
+
 # ─── Status (inline) ───────────────────────────────────────────────────────
 cmd_status() {
     local do_health=false
@@ -209,6 +275,8 @@ case "$COMMAND" in
     upgrade) exec "$MUSTANGCLAW_ROOT/scripts/upgrade.sh"      "$@" ;;
     ssh)     exec "$MUSTANGCLAW_ROOT/scripts/ssh-do.sh"       "$@" ;;
     sandbox) exec "$MUSTANGCLAW_ROOT/scripts/sandbox-build.sh" "$@" ;;
+    token)     cmd_token ;;
+    dashboard) cmd_dashboard ;;
     docker)
         gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
         if [[ -z "$gw_container" ]]; then
