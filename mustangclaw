@@ -24,6 +24,8 @@ Commands:
   sandbox   Build sandbox images for agent isolation    [--browser] [--common] [--all]
   token     Show the current gateway token
   dashboard Open OpenClaw Control in the browser (with token)
+  restart   Restart the gateway container
+  logs      Tail gateway container logs                [--lines N]
   docker    Open a shell inside the gateway container
   rotate-tokens  Rotate all device tokens with full scope set (2026.2.19 fix)
   status    Show local container & remote droplet status  [--health]
@@ -314,8 +316,23 @@ case "$COMMAND" in
     upgrade) exec "$MUSTANGCLAW_ROOT/scripts/upgrade.sh"      "$@" ;;
     ssh)     exec "$MUSTANGCLAW_ROOT/scripts/ssh-do.sh"       "$@" ;;
     sandbox) exec "$MUSTANGCLAW_ROOT/scripts/sandbox-build.sh" "$@" ;;
+    restart)
+        log_info "Restarting gateway..."
+        docker restart mustangclaw
+        log_info "Gateway restarted."
+        ;;
     token)     cmd_token ;;
     dashboard) cmd_dashboard ;;
+    logs)
+        TAIL_LINES=100
+        for arg in "$@"; do
+            case "$arg" in
+                --lines) shift; TAIL_LINES="${1:-100}" ;;
+                --lines=*) TAIL_LINES="${arg#--lines=}" ;;
+            esac
+        done
+        exec docker logs mustangclaw --tail "$TAIL_LINES" -f
+        ;;
     docker)
         gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
         if [[ -z "$gw_container" ]]; then
