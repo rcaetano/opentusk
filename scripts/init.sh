@@ -41,7 +41,7 @@ ask() {
     printf "${_CYAN}%s${_NC} [%s]: " "$prompt" "$default"
     read -r value
     value="${value:-$default}"
-    eval "$var=\$value"
+    printf -v "$var" '%s' "$value"
 }
 
 # Prompt yes/no.  Usage: ask_yn VAR "Prompt text" "y" or "n"
@@ -54,8 +54,8 @@ ask_yn() {
     read -r answer
     answer="${answer:-$default}"
     case "$answer" in
-        [yY]|[yY][eE][sS]) eval "$var=true" ;;
-        *) eval "$var=false" ;;
+        [yY]|[yY][eE][sS]) printf -v "$var" '%s' "true" ;;
+        *) printf -v "$var" '%s' "false" ;;
     esac
 }
 
@@ -66,7 +66,7 @@ ask_secret() {
     printf "${_CYAN}%s${_NC}: " "$prompt"
     read -rs value
     echo ""
-    eval "$var=\$value"
+    printf -v "$var" '%s' "$value"
 }
 
 # ─── Pre-flight ──────────────────────────────────────────────────────────────
@@ -88,7 +88,9 @@ fi
 
 # ─── Create directories ─────────────────────────────────────────────────────
 mkdir -p "$MUSTANGCLAW_CONFIG_DIR"
+chmod 700 "$MUSTANGCLAW_CONFIG_DIR"
 mkdir -p "$MUSTANGCLAW_WORKSPACE_DIR"
+chmod 700 "$MUSTANGCLAW_WORKSPACE_DIR"
 
 # ─── Section: Ports ─────────────────────────────────────────────────────────
 printf "${_GREEN}── Ports ──${_NC}\n"
@@ -160,6 +162,7 @@ if [[ ! -f "$OPENCLAW_JSON" ]]; then
   }
 }
 JSONEOF
+    chmod 600 "$OPENCLAW_JSON"
     log_info "Created $OPENCLAW_JSON"
 fi
 

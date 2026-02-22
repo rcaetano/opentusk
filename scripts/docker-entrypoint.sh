@@ -24,7 +24,13 @@ if [ -d "/poseidon" ] && command -v bun >/dev/null 2>&1; then
     export CORS_ORIGINS="http://localhost:${PORT},http://localhost:5173,http://127.0.0.1:5173"
 
     echo "[entrypoint] Starting Poseidon on port $PORT..."
-    bun /poseidon/apps/api/src/index.ts &
+    # Restart loop: if Poseidon crashes, wait briefly and restart it.
+    # This runs as a background process; the gateway (PID 1) is unaffected.
+    while true; do
+        bun /poseidon/apps/api/src/index.ts || true
+        echo "[entrypoint] Poseidon exited, restarting in 2s..."
+        sleep 2
+    done &
 fi
 
 exec "$@"

@@ -7,13 +7,19 @@
 FROM oven/bun:1 AS builder
 
 WORKDIR /build
-COPY poseidon/ .
 
-# Poseidon uses pnpm workspaces
+# Install pnpm first (rarely changes)
 RUN bun install -g pnpm
+
+# Copy dependency manifests first for layer caching — deps are only reinstalled
+# when package.json or lockfile changes, not on every source code change.
+COPY poseidon/package.json poseidon/pnpm-lock.yaml poseidon/pnpm-workspace.yaml ./
+COPY poseidon/apps/web/package.json ./apps/web/
+COPY poseidon/apps/api/package.json ./apps/api/
 RUN pnpm install --frozen-lockfile
 
-# Build the Vite frontend (output: apps/web/dist/)
+# Now copy full source and build
+COPY poseidon/ .
 RUN pnpm --filter @poseidon/web build
 
 # ─── Stage 2: Overlay onto MustangClaw ───────────────────────────────────────

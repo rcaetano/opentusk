@@ -1,0 +1,9 @@
+{
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": ""
+    }
+  }
+}

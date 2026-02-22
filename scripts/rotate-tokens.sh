@@ -54,13 +54,7 @@ SCOPES=(
 require_cmd docker
 
 # ─── Detect gateway container ──────────────────────────────────────────────
-GW_CONTAINER=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" \
-    --format '{{.Names}}' | head -1)
-
-if [[ -z "$GW_CONTAINER" ]]; then
-    log_error "Gateway container is not running. Start it with 'mustangclaw run'."
-    exit 1
-fi
+GW_CONTAINER=$(require_running_gateway)
 
 # ─── Helper: run openclaw CLI inside the gateway container ─────────────────
 _cli() {

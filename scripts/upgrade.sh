@@ -85,10 +85,7 @@ if [[ "$TARGET" == "local" ]]; then
     fi
 
     log_info "Restarting containers..."
-    COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
-    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
-        COMPOSE_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
-    fi
+    set_compose_files
     docker compose "${COMPOSE_FILES[@]}" down
     docker compose "${COMPOSE_FILES[@]}" up -d openclaw-gateway
 
@@ -100,31 +97,37 @@ fi
 
 # ─── Remote upgrade ─────────────────────────────────────────────────────────
 require_cmd ssh
+require_cmd rsync
 
 if [[ -z "$IP" ]]; then
     require_cmd doctl "doctl is required to auto-detect droplet IP. Install it or use --ip."
     IP=$(get_droplet_ip)
 fi
 
-GIT_CMD="git pull"
 if [[ "$ROLLBACK" == "true" ]]; then
-    GIT_CMD="git checkout HEAD~1"
     log_warn "Rolling back remote to previous commit..."
 else
     log_info "Upgrading remote at $IP..."
 fi
 
+# Sync wrapper scripts to remote
+log_info "Syncing wrapper project to remote..."
+rsync -avz --progress -e "ssh" \
+    --exclude='openclaw/' --exclude='poseidon/' --exclude='.git/' \
+    --exclude='node_modules/' --exclude='.mustangclaw/' \
+    "$PROJECT_ROOT/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/"
+
+# Run upgrade via the wrapper CLI on remote
+ROLLBACK_FLAG=""
+if [[ "$ROLLBACK" == "true" ]]; then
+    ROLLBACK_FLAG="--rollback"
+fi
+
 ssh "mustangclaw@${IP}" bash <<EOF
 set -euo pipefail
 cd /home/mustangclaw/mustangclaw
-OLD_SHA=\$(git rev-parse --short HEAD)
-$GIT_CMD
-NEW_SHA=\$(git rev-parse --short HEAD)
-echo "OLD_SHA=\$OLD_SHA"
-echo "NEW_SHA=\$NEW_SHA"
-docker build -t mustangclaw:local .
-docker compose down
-docker compose up -d openclaw-gateway
+chmod +x mustangclaw
+./mustangclaw upgrade $ROLLBACK_FLAG
 EOF
 
 log_info "Remote upgrade complete at $IP."

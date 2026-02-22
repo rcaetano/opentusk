@@ -46,6 +46,7 @@ log_info "Validating prerequisites..."
 require_cmd doctl
 require_cmd ssh
 require_cmd ssh-keygen
+require_cmd rsync
 
 if [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
     log_error "DIGITALOCEAN_ACCESS_TOKEN is not set."
@@ -98,9 +99,10 @@ Then provision via SSH:
   - Configure UFW (SSH only)
   - Install fail2ban
   - Harden sshd
-  - Clone + build MustangClaw
+  - Deploy wrapper project via rsync
+  - Build Docker images (openclaw + poseidon)
   - Generate gateway token
-  - docker compose up
+  - Start gateway via mustangclaw run
 EOF
     if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         echo "  - Install Tailscale ($TAILSCALE_MODE mode)"
@@ -144,12 +146,12 @@ echo ""
 log_info "SSH is ready."
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 5: Remote provisioning
+# Phase 5: Security hardening (runs as root)
 # ═══════════════════════════════════════════════════════════════════════════════
 GATEWAY_TOKEN=$(openssl rand -hex 32)
 GATEWAY_PASSWORD=$(openssl rand -hex 16)
 
-log_info "Provisioning droplet..."
+log_info "Hardening droplet security..."
 
 # Build the Tailscale provisioning block conditionally
 TAILSCALE_BLOCK=""
@@ -210,60 +212,117 @@ ChallengeResponseAuthentication no
 SSHEOF
 systemctl reload sshd
 
-# ── Clone MustangClaw ───────────────────────────────────────────────────────
-if [[ ! -d /home/mustangclaw/mustangclaw ]]; then
-    su - mustangclaw -c 'git clone ${MUSTANGCLAW_REPO} /home/mustangclaw/mustangclaw'
-fi
-
-# ── Build Docker image ───────────────────────────────────────────────────
-su - mustangclaw -c 'cd /home/mustangclaw/mustangclaw && docker build -t mustangclaw:local .'
-
-# ── Config directories ───────────────────────────────────────────────────
-su - mustangclaw -c 'mkdir -p /home/mustangclaw/.mustangclaw/workspace'
-
-# ── Write .env ───────────────────────────────────────────────────────────
-cat > /home/mustangclaw/mustangclaw/.env <<ENVEOF
-OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
-OPENCLAW_GATEWAY_PASSWORD=${GATEWAY_PASSWORD}
-OPENCLAW_CONFIG_DIR=/home/mustangclaw/.mustangclaw
-OPENCLAW_WORKSPACE_DIR=/home/mustangclaw/.mustangclaw/workspace
-OPENCLAW_DISABLE_BONJOUR=1
-ENVEOF
-chown mustangclaw:mustangclaw /home/mustangclaw/mustangclaw/.env
-chmod 600 /home/mustangclaw/mustangclaw/.env
-
 ${TAILSCALE_BLOCK}
 
-# ── Generate docker-compose override (container_name) ────────────────────
-cat > /home/mustangclaw/mustangclaw/docker-compose.override.yml <<'OVEOF'
-services:
-  openclaw-gateway:
-    container_name: mustangclaw
-OVEOF
-chown mustangclaw:mustangclaw /home/mustangclaw/mustangclaw/docker-compose.override.yml
-
-# ── Start containers ─────────────────────────────────────────────────────
-su - mustangclaw -c 'cd /home/mustangclaw/mustangclaw && docker compose up -d openclaw-gateway'
-
-echo "Provisioning complete."
+echo "Security hardening complete."
 PROVISION
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 6: Print connection summary
+# Phase 6: Deploy wrapper project and build
+# ═══════════════════════════════════════════════════════════════════════════════
+log_info "Deploying MustangClaw wrapper to remote..."
+rsync -avz --progress -e "ssh" \
+    --exclude='openclaw/' --exclude='poseidon/' --exclude='.git/' \
+    --exclude='node_modules/' --exclude='.mustangclaw/' \
+    "$PROJECT_ROOT/" "mustangclaw@${DROPLET_IP}:/home/mustangclaw/mustangclaw/"
+
+log_info "Building Docker images and starting gateway on remote..."
+ssh "mustangclaw@${DROPLET_IP}" bash <<DEPLOY
+set -euo pipefail
+cd /home/mustangclaw/mustangclaw
+chmod +x mustangclaw
+
+# Build (clones openclaw + poseidon, builds Docker images)
+./mustangclaw build
+
+# Seed config directory with correct permissions
+mkdir -p /home/mustangclaw/.mustangclaw/workspace
+chmod 700 /home/mustangclaw/.mustangclaw
+chmod 700 /home/mustangclaw/.mustangclaw/workspace
+
+cat > /home/mustangclaw/.mustangclaw/config.env <<CFGEOF
+GATEWAY_PORT=${GATEWAY_PORT}
+BRIDGE_PORT=${BRIDGE_PORT}
+POSEIDON_PORT=${POSEIDON_PORT}
+CFGEOF
+chmod 600 /home/mustangclaw/.mustangclaw/config.env
+
+# Write openclaw.json with gateway token
+cat > /home/mustangclaw/.mustangclaw/openclaw.json <<JSONEOF
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "${GATEWAY_TOKEN}"
+    }
+  }
+}
+JSONEOF
+chmod 600 /home/mustangclaw/.mustangclaw/openclaw.json
+
+# Start the gateway (generates .env, override, starts containers with Poseidon)
+./mustangclaw run
+
+echo "Deploy complete."
+DEPLOY
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 7: Post-deploy smoke test
+# ═══════════════════════════════════════════════════════════════════════════════
+log_info "Running post-deploy smoke test..."
+SMOKE_OK=true
+
+# Check container is running
+CONTAINER_STATUS=$(ssh "mustangclaw@${DROPLET_IP}" \
+    'docker ps --filter "name=^mustangclaw$" --filter "status=running" --format "{{.Status}}"' 2>/dev/null || true)
+if [[ -n "$CONTAINER_STATUS" ]]; then
+    log_info "  Container: running ($CONTAINER_STATUS)"
+else
+    log_error "  Container: NOT running"
+    SMOKE_OK=false
+fi
+
+# Check gateway port is listening
+if ssh "mustangclaw@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
+    log_info "  Gateway port ${GATEWAY_PORT}: responding"
+else
+    log_warn "  Gateway port ${GATEWAY_PORT}: not responding yet (may still be starting)"
+fi
+
+if [[ "$SMOKE_OK" != "true" ]]; then
+    log_error "Smoke test failed. Check: ssh mustangclaw@${DROPLET_IP}"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 8: Print connection summary
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Deployment complete!"
 echo ""
 echo "  Droplet IP:  $DROPLET_IP"
 echo "  SSH:         ssh mustangclaw@${DROPLET_IP}"
 echo "  Gateway:     ssh -L ${GATEWAY_PORT}:localhost:${GATEWAY_PORT} mustangclaw@${DROPLET_IP}"
-echo "               then open http://localhost:${GATEWAY_PORT}?token=${GATEWAY_TOKEN}"
+echo "               then open http://localhost:${GATEWAY_PORT}"
 echo ""
-echo "  Gateway token:    $GATEWAY_TOKEN"
-echo "  Gateway password: $GATEWAY_PASSWORD"
+# Write credentials to a file instead of printing to terminal
+CREDS_FILE="$MUSTANGCLAW_CONFIG_DIR/remote-credentials"
+mkdir -p "$MUSTANGCLAW_CONFIG_DIR"
+cat > "$CREDS_FILE" <<CREDEOF
+# MustangClaw remote deployment credentials
+# Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+GATEWAY_TOKEN=$GATEWAY_TOKEN
+GATEWAY_PASSWORD=$GATEWAY_PASSWORD
+CREDEOF
+chmod 600 "$CREDS_FILE"
+echo "  Credentials saved to: $CREDS_FILE"
+echo "  Gateway token:    ${GATEWAY_TOKEN:0:8}..."
+echo "  Gateway password: ${GATEWAY_PASSWORD:0:8}..."
 echo ""
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     echo "  Tailscale:   https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net"
     echo "  Mode:        $TAILSCALE_MODE"
     echo ""
 fi
-log_warn "Save the token and password above — they are not stored locally."
+log_warn "Full credentials stored in $CREDS_FILE (chmod 600)."

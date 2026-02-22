@@ -49,24 +49,15 @@ run_cli() {
     source "$MUSTANGCLAW_DIR/.env"
 
     # Prefer token from openclaw.json (source of truth after 'mustangclaw setup')
-    local openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
-    if [[ -f "$openclaw_json" ]]; then
-        local json_token
-        json_token=$(python3 -c "
-import json, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
-except: pass
-" "$openclaw_json" 2>/dev/null || true)
-        if [[ -n "$json_token" ]]; then
-            OPENCLAW_GATEWAY_TOKEN="$json_token"
-        fi
+    local json_token
+    json_token=$(read_json_token)
+    if [[ -n "$json_token" ]]; then
+        OPENCLAW_GATEWAY_TOKEN="$json_token"
     fi
 
     local network_flag=()
     local gw_container
-    gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
+    gw_container=$(get_running_gateway)
     if [[ -n "$gw_container" ]]; then
         network_flag=(--network "container:$gw_container")
     fi
@@ -84,18 +75,11 @@ except: pass
 # ─── Sync gateway token from openclaw.json → .env ────────────────────────
 # Returns 0 if token was updated, 1 if no change needed.
 sync_gateway_token() {
-    local openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
     local env_file="$MUSTANGCLAW_DIR/.env"
-    [[ -f "$openclaw_json" && -f "$env_file" ]] || return 1
+    [[ -f "$MUSTANGCLAW_CONFIG_DIR/openclaw.json" && -f "$env_file" ]] || return 1
 
     local new_token old_token
-    new_token=$(python3 -c "
-import json, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
-except: pass
-" "$openclaw_json" 2>/dev/null || true)
+    new_token=$(read_json_token)
     old_token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
     [[ -n "$new_token" && "$new_token" != "$old_token" ]] || return 1
 
@@ -120,13 +104,12 @@ cmd_setup() {
     if sync_gateway_token; then
         log_info "Gateway token updated by setup wizard. Syncing..."
         local gw_container
-        gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" \
-            --format '{{.Names}}' | head -1)
+        gw_container=$(get_running_gateway)
         if [[ -n "$gw_container" ]]; then
             log_info "Restarting gateway to apply new token..."
             cd "$PROJECT_ROOT"
-            docker compose -f "$MUSTANGCLAW_DIR/docker-compose.yml" \
-                -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" up -d openclaw-gateway
+            set_compose_files
+            docker compose "${COMPOSE_FILES[@]}" up -d openclaw-gateway
         fi
         # Clear device tokens invalidated by the token change
         rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"* 2>/dev/null || true
@@ -146,16 +129,7 @@ cmd_token() {
     local token=""
 
     # 1. Try openclaw.json (source of truth)
-    local openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
-    if [[ -f "$openclaw_json" ]]; then
-        token=$(python3 -c "
-import json, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
-except: pass
-" "$openclaw_json" 2>/dev/null || true)
-    fi
+    token=$(read_json_token)
 
     # 2. Fall back to .env
     if [[ -z "$token" ]]; then
@@ -168,7 +142,7 @@ except: pass
     # 3. Try reading from the running container's environment
     if [[ -z "$token" ]] && command -v docker &>/dev/null; then
         local gw_container
-        gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
+        gw_container=$(get_running_gateway)
         if [[ -n "$gw_container" ]]; then
             token=$(docker exec "$gw_container" printenv OPENCLAW_GATEWAY_TOKEN 2>/dev/null || true)
         fi
@@ -188,13 +162,8 @@ cmd_dashboard() {
     rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"* 2>/dev/null || true
 
     require_cmd docker
-
     local gw_container
-    gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
-    if [[ -z "$gw_container" ]]; then
-        log_error "Gateway container is not running. Start it with 'mustangclaw run'."
-        exit 1
-    fi
+    gw_container=$(require_running_gateway)
 
     # Get a fresh dashboard link from the gateway CLI (includes pairing token).
     local dash_url=""
@@ -226,19 +195,7 @@ cmd_dashboard() {
         fi
     ) &
 
-    # macOS
-    if command -v open &>/dev/null; then
-        open "$dash_url"
-    # Linux (xdg)
-    elif command -v xdg-open &>/dev/null; then
-        xdg-open "$dash_url"
-    # WSL
-    elif command -v wslview &>/dev/null; then
-        wslview "$dash_url"
-    else
-        log_warn "Could not detect a browser opener. Open this URL manually:"
-        echo "$dash_url"
-    fi
+    open_url "$dash_url"
 
     log_info "Waiting a few seconds to auto-approve browser device pairing..."
     wait
@@ -247,30 +204,11 @@ cmd_dashboard() {
 # ─── Poseidon (inline) ─────────────────────────────────────────────────────
 cmd_poseidon() {
     require_cmd docker
-
-    local gw_container
-    gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
-    if [[ -z "$gw_container" ]]; then
-        log_error "Gateway container is not running. Start it with 'mustangclaw run'."
-        exit 1
-    fi
+    require_running_gateway >/dev/null
 
     local url="http://localhost:${POSEIDON_PORT}"
     log_info "Opening Poseidon: $url"
-
-    # macOS
-    if command -v open &>/dev/null; then
-        open "$url"
-    # Linux (xdg)
-    elif command -v xdg-open &>/dev/null; then
-        xdg-open "$url"
-    # WSL
-    elif command -v wslview &>/dev/null; then
-        wslview "$url"
-    else
-        log_warn "Could not detect a browser opener. Open this URL manually:"
-        echo "$url"
-    fi
+    open_url "$url"
 }
 
 # ─── Status (inline) ───────────────────────────────────────────────────────
@@ -292,10 +230,11 @@ cmd_status() {
             # Application-level health check
             if [[ "$do_health" == "true" ]]; then
                 printf "\n${_CYAN}── Gateway Health ──${_NC}\n"
-                local env_file="$MUSTANGCLAW_DIR/.env"
-                local token=""
-                if [[ -f "$env_file" ]]; then
-                    token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
+                local token
+                token=$(read_json_token)
+                if [[ -z "$token" ]]; then
+                    local env_file="$MUSTANGCLAW_DIR/.env"
+                    [[ -f "$env_file" ]] && token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
                 fi
                 local health_output
                 if health_output=$(docker exec mustangclaw node dist/index.js health --token "$token" 2>&1); then
@@ -365,11 +304,7 @@ case "$COMMAND" in
         exec docker logs mustangclaw --tail "$TAIL_LINES" -f
         ;;
     docker)
-        gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
-        if [[ -z "$gw_container" ]]; then
-            log_error "Gateway container is not running. Start it with 'mustangclaw run'."
-            exit 1
-        fi
+        gw_container=$(require_running_gateway)
         # Install 'openclaw' wrapper so the command works inside the shell
         docker exec --user root "$gw_container" sh -c \
             'printf "#!/bin/sh\ncd /app && exec node dist/index.js \"\$@\"\n" > /usr/local/bin/openclaw && chmod +x /usr/local/bin/openclaw'

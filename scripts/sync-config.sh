@@ -72,10 +72,7 @@ if [[ "$TARGET" == "local" ]]; then
 
     log_info "Restarting gateway..."
     cd "$PROJECT_ROOT"
-    COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
-    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
-        COMPOSE_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
-    fi
+    set_compose_files
     docker compose "${COMPOSE_FILES[@]}" restart openclaw-gateway
 
     log_info "Config synced to local container."
@@ -91,13 +88,13 @@ if [[ -z "$IP" ]]; then
     IP=$(get_droplet_ip)
 fi
 
-RSYNC_FLAGS="-avz --progress"
+RSYNC_FLAGS=(-avz --progress)
 if [[ "$DRY_RUN" == "true" ]]; then
-    RSYNC_FLAGS="$RSYNC_FLAGS --dry-run"
+    RSYNC_FLAGS+=(--dry-run)
 fi
 
 log_info "Syncing $MUSTANGCLAW_CONFIG_DIR to mustangclaw@${IP}..."
-rsync $RSYNC_FLAGS -e "ssh" \
+rsync "${RSYNC_FLAGS[@]}" -e "ssh" \
     "$MUSTANGCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.mustangclaw/"
 
 if [[ "$DRY_RUN" == "true" ]]; then

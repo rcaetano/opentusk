@@ -53,18 +53,17 @@ fi
 # ─── Stop mode ───────────────────────────────────────────────────────────────
 if [[ "$STOP" == "true" ]]; then
     log_info "Stopping MustangClaw gateway..."
-    STOP_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
-    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
-        STOP_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
-    fi
-    docker compose "${STOP_FILES[@]}" down
+    set_compose_files
+    docker compose "${COMPOSE_FILES[@]}" down
     log_info "Gateway stopped."
     exit 0
 fi
 
 # ─── Ensure config directories ──────────────────────────────────────────────
 mkdir -p "$MUSTANGCLAW_CONFIG_DIR"
+chmod 700 "$MUSTANGCLAW_CONFIG_DIR"
 mkdir -p "$MUSTANGCLAW_WORKSPACE_DIR"
+chmod 700 "$MUSTANGCLAW_WORKSPACE_DIR"
 
 # ─── Clear stale device tokens ──────────────────────────────────────────────
 # Device tokens from previous sessions cause "device token mismatch" errors
@@ -85,35 +84,15 @@ if [[ ! -f "$OPENCLAW_JSON" ]]; then
   }
 }
 JSONEOF
+    chmod 600 "$OPENCLAW_JSON"
 fi
 
 # ─── Patch openclaw.json for Docker compatibility ────────────────────────────
 # The 'mustangclaw setup' wizard may set gateway.bind=loopback and add tailscale
 # config, which conflicts with Docker networking. Fix these before starting.
-if [[ -f "$OPENCLAW_JSON" ]]; then
-    NEEDS_PATCH=false
-    if grep -q '"bind"[[:space:]]*:[[:space:]]*"loopback"' "$OPENCLAW_JSON"; then
-        NEEDS_PATCH=true
-    fi
-    if grep -q '"tailscale"' "$OPENCLAW_JSON"; then
-        NEEDS_PATCH=true
-    fi
-    if [[ "$NEEDS_PATCH" == "true" ]]; then
-        require_cmd python3
-        python3 -c "
-import json, sys
-with open(sys.argv[1], 'r') as f:
-    cfg = json.load(f)
-gw = cfg.get('gateway', {})
-gw['bind'] = 'lan'
-gw.pop('tailscale', None)
-cfg['gateway'] = gw
-with open(sys.argv[1], 'w') as f:
-    json.dump(cfg, f, indent=2)
-    f.write('\n')
-" "$OPENCLAW_JSON"
-        log_info "Patched openclaw.json (bind=lan, removed tailscale) for Docker."
-    fi
+require_cmd python3
+if patch_json_for_docker "$OPENCLAW_JSON"; then
+    log_info "Patched openclaw.json (bind=lan, removed tailscale) for Docker."
 fi
 
 # ─── Resolve gateway token ────────────────────────────────────────────────────
@@ -122,15 +101,7 @@ fi
 ENV_FILE="$MUSTANGCLAW_DIR/.env"
 GATEWAY_TOKEN=""
 
-if [[ -f "$OPENCLAW_JSON" ]]; then
-    GATEWAY_TOKEN=$(python3 -c "
-import json, sys
-try:
-    cfg = json.load(open(sys.argv[1]))
-    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
-except: pass
-" "$OPENCLAW_JSON" 2>/dev/null || true)
-fi
+GATEWAY_TOKEN=$(read_json_token "$OPENCLAW_JSON")
 
 if [[ -z "$GATEWAY_TOKEN" ]] && [[ -f "$ENV_FILE" ]] && grep -q '^OPENCLAW_GATEWAY_TOKEN=' "$ENV_FILE"; then
     GATEWAY_TOKEN=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
@@ -145,20 +116,8 @@ fi
 # Ensure openclaw.json carries the same token the gateway will use via the
 # OPENCLAW_GATEWAY_TOKEN env-var.  Keeps the two in sync from the start so
 # that 'mustangclaw setup' can later detect (and reconcile) any change.
-require_cmd python3
-python3 -c "
-import json, sys
-p, tok = sys.argv[1], sys.argv[2]
-with open(p, 'r') as f:
-    cfg = json.load(f)
-gw = cfg.setdefault('gateway', {})
-auth = gw.setdefault('auth', {})
-auth['mode'] = 'token'
-auth['token'] = tok
-with open(p, 'w') as f:
-    json.dump(cfg, f, indent=2)
-    f.write('\n')
-" "$OPENCLAW_JSON" "$GATEWAY_TOKEN"
+write_json_token "$GATEWAY_TOKEN" "$OPENCLAW_JSON"
+chmod 600 "$OPENCLAW_JSON"
 log_info "Wrote gateway token to openclaw.json."
 
 # ─── Write .env ──────────────────────────────────────────────────────────────
@@ -252,8 +211,10 @@ docker compose "${COMPOSE_FILES[@]}" up -d openclaw-gateway
 
 # ─── Print connection info ───────────────────────────────────────────────────
 log_info "Gateway is running."
-log_info "  Gateway:  http://localhost:${GATEWAY_PORT}?token=${GATEWAY_TOKEN}"
+log_info "  Gateway:  http://localhost:${GATEWAY_PORT}"
 log_info "  Poseidon: http://localhost:${POSEIDON_PORT}"
+log_info "  Run 'mustangclaw dashboard' to open with authentication."
+log_info "  Run 'mustangclaw token' to print the gateway token."
 
 # ─── Tail logs if requested ─────────────────────────────────────────────────
 if [[ "$LOGS" == "true" ]]; then
