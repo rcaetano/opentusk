@@ -177,6 +177,7 @@ OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN
 OPENCLAW_CONFIG_DIR=$MUSTANGCLAW_CONFIG_DIR
 OPENCLAW_WORKSPACE_DIR=$MUSTANGCLAW_WORKSPACE_DIR
 OPENCLAW_GATEWAY_BIND=lan
+POSEIDON_PORT=$POSEIDON_PORT
 EOF
 
 if [[ -n "$EXISTING" ]]; then
@@ -222,6 +223,10 @@ services:
     volumes:
       - ${ENTRYPOINT_SRC}:/usr/local/bin/docker-entrypoint.sh:ro
 ${EXTRA_VOLUMES}    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    ports:
+      - "${POSEIDON_PORT}:${POSEIDON_PORT}"
+    environment:
+      - POSEIDON_PORT=${POSEIDON_PORT}
 YMLEOF
 
 # Append top-level volumes section if a named volume is used
@@ -247,7 +252,8 @@ docker compose "${COMPOSE_FILES[@]}" up -d openclaw-gateway
 
 # ─── Print connection info ───────────────────────────────────────────────────
 log_info "Gateway is running."
-log_info "  URL: http://localhost:${GATEWAY_PORT}?token=${GATEWAY_TOKEN}"
+log_info "  Gateway:  http://localhost:${GATEWAY_PORT}?token=${GATEWAY_TOKEN}"
+log_info "  Poseidon: http://localhost:${POSEIDON_PORT}"
 
 # ─── Tail logs if requested ─────────────────────────────────────────────────
 if [[ "$LOGS" == "true" ]]; then

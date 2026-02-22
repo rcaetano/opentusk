@@ -72,6 +72,18 @@ if [[ "$TARGET" == "local" ]]; then
     log_info "Building Docker image..."
     docker build -t "$MUSTANGCLAW_IMAGE" "$MUSTANGCLAW_DIR"
 
+    # ─── Update Poseidon ──────────────────────────────────────────────────
+    if [[ -d "$POSEIDON_DIR" ]]; then
+        if [[ "$ROLLBACK" == "true" ]]; then
+            git -C "$POSEIDON_DIR" checkout HEAD~1
+        else
+            log_info "Pulling latest Poseidon changes..."
+            git -C "$POSEIDON_DIR" pull
+        fi
+        log_info "Rebuilding Poseidon overlay..."
+        docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$MUSTANGCLAW_IMAGE" "$PROJECT_ROOT"
+    fi
+
     log_info "Restarting containers..."
     COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
     if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then

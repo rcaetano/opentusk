@@ -12,6 +12,11 @@ MUSTANGCLAW_WORKSPACE_DIR="$HOME/.mustangclaw/workspace"
 GATEWAY_PORT=18789
 BRIDGE_PORT=18790
 
+# ─── Poseidon ──────────────────────────────────────────────────────────────
+POSEIDON_REPO="https://github.com/rcaetano/poseidon.git"
+POSEIDON_DIR="./poseidon"                      # local clone path (relative to project root)
+POSEIDON_PORT=18791
+
 # ─── DigitalOcean ────────────────────────────────────────────────────────────
 DO_DROPLET_NAME="mustangclaw"
 DO_REGION="nyc3"

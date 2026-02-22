@@ -77,6 +77,21 @@ fi
 log_info "Building Docker image $MUSTANGCLAW_IMAGE..."
 docker build "${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}" -t "$MUSTANGCLAW_IMAGE" "$MUSTANGCLAW_DIR"
 
+# ─── Clone or update Poseidon ──────────────────────────────────────────────
+if [[ ! -d "$POSEIDON_DIR" ]]; then
+    log_info "Cloning Poseidon repository..."
+    git clone "$POSEIDON_REPO" "$POSEIDON_DIR"
+elif [[ "$NO_PULL" == "false" ]]; then
+    log_info "Updating Poseidon repository..."
+    git -C "$POSEIDON_DIR" pull
+else
+    log_info "Skipping Poseidon git pull (--no-pull)."
+fi
+
+# ─── Build Poseidon overlay image ──────────────────────────────────────────
+log_info "Building Poseidon overlay onto $MUSTANGCLAW_IMAGE..."
+docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$MUSTANGCLAW_IMAGE" "$PROJECT_ROOT"
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 IMAGE_ID=$(docker images --no-trunc --format '{{.ID}}' "$MUSTANGCLAW_IMAGE" | head -1)
 IMAGE_SIZE=$(docker images --format '{{.Size}}' "$MUSTANGCLAW_IMAGE" | head -1)

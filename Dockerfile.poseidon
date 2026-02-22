@@ -1,0 +1,33 @@
+# Dockerfile.poseidon — Multi-stage build to overlay Poseidon onto mustangclaw:local
+#
+# Stage 1: Install dependencies and build the Vite frontend
+# Stage 2: Copy built Poseidon + bun binary onto the existing MustangClaw image
+
+# ─── Stage 1: Builder ────────────────────────────────────────────────────────
+FROM oven/bun:1 AS builder
+
+WORKDIR /build
+COPY poseidon/ .
+
+# Poseidon uses pnpm workspaces
+RUN bun install -g pnpm
+RUN pnpm install --frozen-lockfile
+
+# Build the Vite frontend (output: apps/web/dist/)
+RUN pnpm --filter @poseidon/web build
+
+# ─── Stage 2: Overlay onto MustangClaw ───────────────────────────────────────
+FROM mustangclaw:local
+
+USER root
+
+# Copy entire Poseidon app (API source + built frontend + node_modules)
+COPY --from=builder /build /poseidon
+
+# Ensure bun is on PATH (not present in the Node-based base image)
+COPY --from=builder /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=builder /usr/local/bin/bunx /usr/local/bin/bunx
+
+EXPOSE 18791
+
+USER node

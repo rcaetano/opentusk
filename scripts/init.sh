@@ -92,8 +92,9 @@ mkdir -p "$MUSTANGCLAW_WORKSPACE_DIR"
 
 # ─── Section: Ports ─────────────────────────────────────────────────────────
 printf "${_GREEN}── Ports ──${_NC}\n"
-ask _GATEWAY_PORT  "Gateway port"  "$GATEWAY_PORT"
-ask _BRIDGE_PORT   "Bridge port"   "$BRIDGE_PORT"
+ask _GATEWAY_PORT   "Gateway port"   "$GATEWAY_PORT"
+ask _BRIDGE_PORT    "Bridge port"    "$BRIDGE_PORT"
+ask _POSEIDON_PORT  "Poseidon port"  "$POSEIDON_PORT"
 echo ""
 
 # ─── Section: DigitalOcean ──────────────────────────────────────────────────
@@ -123,6 +124,7 @@ cat > "$CONFIG_FILE" <<EOF
 # ─── Ports ──────────────────────────────────────────────────────────────────
 GATEWAY_PORT=$_GATEWAY_PORT
 BRIDGE_PORT=$_BRIDGE_PORT
+POSEIDON_PORT=$_POSEIDON_PORT
 
 # ─── DigitalOcean ───────────────────────────────────────────────────────────
 EOF

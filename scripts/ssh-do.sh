@@ -47,10 +47,11 @@ fi
 
 # ─── Connect ─────────────────────────────────────────────────────────────────
 if [[ "$TUNNEL" == "true" ]]; then
-    log_info "Connecting with port forwarding (gateway: $GATEWAY_PORT, bridge: $BRIDGE_PORT)..."
+    log_info "Connecting with port forwarding (gateway: $GATEWAY_PORT, bridge: $BRIDGE_PORT, poseidon: $POSEIDON_PORT)..."
     log_info "Open http://localhost:${GATEWAY_PORT} in your browser once connected."
     exec ssh -L "${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
              -L "${BRIDGE_PORT}:localhost:${BRIDGE_PORT}" \
+             -L "${POSEIDON_PORT}:localhost:${POSEIDON_PORT}" \
              "mustangclaw@${IP}"
 else
     log_info "Connecting to mustangclaw@${IP}..."

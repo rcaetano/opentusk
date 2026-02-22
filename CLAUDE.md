@@ -10,6 +10,7 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 ./mustangclaw run       # start gateway container locally
 ./mustangclaw setup     # run OpenClaw's onboarding wizard (API keys, models, auth)
 ./mustangclaw dashboard # open OpenClaw Control in browser (auto-approves device pairing)
+./mustangclaw poseidon  # open Poseidon dashboard in browser
 ./mustangclaw tui       # launch TUI client (gateway must be running)
 ./mustangclaw token     # print the gateway token (for scripts or manual use)
 ./mustangclaw restart   # restart the gateway container
@@ -37,7 +38,9 @@ scripts/
   upgrade.sh             # git pull + rebuild (local or remote)
   ssh-do.sh              # SSH into droplet with optional port forwarding
   cloud-init.yml         # cloud-init user data for droplet bootstrap
+Dockerfile.poseidon      # multi-stage build: Poseidon overlay onto mustangclaw:local
 openclaw/                # upstream openclaw repo (git-ignored, created by build)
+poseidon/                # upstream poseidon repo (git-ignored, created by build)
 ```
 
 ## Configuration
@@ -55,7 +58,25 @@ Key variables from `scripts/config.sh`:
 - `MUSTANGCLAW_DIR` — local clone path (`./openclaw`)
 - `MUSTANGCLAW_IMAGE` — Docker image name (`mustangclaw:local`)
 - `MUSTANGCLAW_CONFIG_DIR` — user config dir (`~/.mustangclaw`)
-- `GATEWAY_PORT` / `BRIDGE_PORT` — Docker port mappings (18789 / 18790)
+- `GATEWAY_PORT` / `BRIDGE_PORT` / `POSEIDON_PORT` — Docker port mappings (18789 / 18790 / 18791)
+- `POSEIDON_REPO` — Poseidon git URL
+- `POSEIDON_DIR` — local Poseidon clone path (`./poseidon`)
+
+## Poseidon Dev Mode
+
+When developing the Poseidon frontend locally against a Docker-hosted API:
+
+```bash
+cd poseidon && pnpm dev:web    # start Vite dev server on port 5173
+```
+
+The Vite dev server proxies `/api` and `/ws` requests to the Poseidon API inside Docker (port 18791 by default). Override with `VITE_API_TARGET`:
+
+```bash
+VITE_API_TARGET=http://localhost:3001 pnpm dev:web   # target a local API instead
+```
+
+The Docker entrypoint (`scripts/docker-entrypoint.sh`) includes `http://localhost:5173` in `CORS_ORIGINS` so the Vite dev server origin is accepted.
 
 ## Docker Architecture
 
@@ -67,6 +88,7 @@ Key variables from `scripts/config.sh`:
 - The gateway token (`OPENCLAW_GATEWAY_TOKEN`) is the API/device pairing token stored in `openclaw/.env` and passed to the container as an env var. This is separate from user-facing auth in `openclaw.json` (which may use `auth.mode: "password"` or `auth.mode: "token"`). `mustangclaw run` resolves the token from `openclaw.json` first, then `.env`, then generates a new one
 - Browser devices connecting to the dashboard must be **paired** (approved). `mustangclaw dashboard` handles this automatically. Device pairings are stored in `~/.mustangclaw/devices/` and go stale on gateway restarts
 - The dashboard URL uses a **hash fragment** (`/#token=...`), not a query parameter
+- **Poseidon** (agent dashboard) is bundled into the image via `Dockerfile.poseidon` — a multi-stage overlay that builds the Vite frontend and copies the Bun API + static files into `/poseidon`. The entrypoint starts Poseidon in the background on `POSEIDON_PORT` (default 18791) before launching the gateway. When Poseidon is not bundled, the entrypoint skips it gracefully
 
 ## Build Options
 
@@ -146,7 +168,7 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 ./mustangclaw init              # set DO token, region, size
 ./mustangclaw deploy            # create & provision droplet
 ./mustangclaw sync              # push ~/.mustangclaw config to remote
-./mustangclaw ssh --tunnel      # SSH with port forwarding for gateway UI
+./mustangclaw ssh --tunnel      # SSH with port forwarding (gateway, bridge, poseidon)
 ./mustangclaw upgrade --target remote  # pull latest & rebuild on droplet
 ./mustangclaw destroy           # tear down droplet
 ```

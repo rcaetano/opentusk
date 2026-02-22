@@ -14,4 +14,17 @@ cfg.gateway = gw;
 fs.writeFileSync('$CONFIG', JSON.stringify(cfg, null, 2) + '\n');
 " 2>/dev/null || true
 fi
+# ─── Start Poseidon if bundled ────────────────────────────────────────────
+if [ -d "/poseidon" ] && command -v bun >/dev/null 2>&1; then
+    export PORT="${POSEIDON_PORT:-18791}"
+    export GATEWAY_URL="ws://127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}"
+    export GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-}"
+    export OPENCLAW_SOURCE="local"
+    export POSEIDON_STATIC_DIR="/poseidon/apps/web/dist"
+    export CORS_ORIGINS="http://localhost:${PORT},http://localhost:5173,http://127.0.0.1:5173"
+
+    echo "[entrypoint] Starting Poseidon on port $PORT..."
+    bun /poseidon/apps/api/src/index.ts &
+fi
+
 exec "$@"

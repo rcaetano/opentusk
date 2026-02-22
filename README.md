@@ -104,6 +104,26 @@ After building, enable sandboxing in `~/.mustangclaw/openclaw.json`:
 }
 ```
 
+## Poseidon (Agent Dashboard)
+
+```bash
+./mustangclaw poseidon        # open Poseidon dashboard in browser (port 18791)
+```
+
+### Dev Mode
+
+To develop the Poseidon frontend locally with hot-reload while the API runs inside Docker:
+
+```bash
+cd poseidon && pnpm dev:web   # Vite dev server on port 5173, proxies to Docker API on 18791
+```
+
+Override the proxy target with `VITE_API_TARGET`:
+
+```bash
+VITE_API_TARGET=http://localhost:3001 pnpm dev:web   # target a local API instead
+```
+
 ## Dashboard & Device Pairing
 
 ```bash
