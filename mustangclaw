@@ -12,7 +12,7 @@ Usage: mustangclaw <command> [options]
 
 Commands:
   init      Configure MustangClaw (interactive wizard) [--reset]
-  build     Clone repo & build Docker image          [--no-pull]
+  build     Clone repo & build Docker image          [--no-pull] [--browser] [--apt PKG]
   run       Run gateway locally                      [--rebuild] [--logs] [--stop]
   tui       Launch interactive TUI client
   setup     Run OpenClaw interactive setup wizard
@@ -21,7 +21,10 @@ Commands:
   sync      Sync ~/.mustangclaw config               [--target local|remote] [--ip IP] [--dry-run]
   upgrade   Upgrade MustangClaw in-place             [--target local|remote] [--ip IP] [--rollback]
   ssh       SSH into droplet                          [--tunnel] [--ip IP]
-  status    Show local container & remote droplet status
+  sandbox   Build sandbox images for agent isolation    [--browser] [--common] [--all]
+  docker    Open a shell inside the gateway container
+  rotate-tokens  Rotate all device tokens with full scope set (2026.2.19 fix)
+  status    Show local container & remote droplet status  [--health]
 
 Run 'mustangclaw <command> --help' for details on a specific command.
 EOF
@@ -39,9 +42,26 @@ run_cli() {
         exit 1
     fi
     source "$MUSTANGCLAW_DIR/.env"
+
+    # Prefer token from openclaw.json (source of truth after 'mustangclaw setup')
+    local openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+    if [[ -f "$openclaw_json" ]]; then
+        local json_token
+        json_token=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
+except: pass
+" "$openclaw_json" 2>/dev/null || true)
+        if [[ -n "$json_token" ]]; then
+            OPENCLAW_GATEWAY_TOKEN="$json_token"
+        fi
+    fi
+
     local network_flag=()
     local gw_container
-    gw_container=$(docker ps --filter "name=openclaw-gateway" --filter "status=running" --format '{{.Names}}' | head -1)
+    gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
     if [[ -n "$gw_container" ]]; then
         network_flag=(--network "container:$gw_container")
     fi
@@ -56,21 +76,102 @@ run_cli() {
         node dist/index.js "$@"
 }
 
+# ─── Sync gateway token from openclaw.json → .env ────────────────────────
+# Returns 0 if token was updated, 1 if no change needed.
+sync_gateway_token() {
+    local openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+    local env_file="$MUSTANGCLAW_DIR/.env"
+    [[ -f "$openclaw_json" && -f "$env_file" ]] || return 1
+
+    local new_token old_token
+    new_token=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
+except: pass
+" "$openclaw_json" 2>/dev/null || true)
+    old_token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
+    [[ -n "$new_token" && "$new_token" != "$old_token" ]] || return 1
+
+    # Update .env with the token from openclaw.json
+    local tmpfile
+    tmpfile=$(mktemp)
+    awk -v tok="$new_token" \
+        '/^OPENCLAW_GATEWAY_TOKEN=/{$0="OPENCLAW_GATEWAY_TOKEN="tok}{print}' \
+        "$env_file" > "$tmpfile" && mv "$tmpfile" "$env_file"
+    return 0
+}
+
+# ─── Setup (inline) ──────────────────────────────────────────────────────
+cmd_setup() {
+    # Use 'onboard' — the Docker-native wizard (official docker-setup.sh uses this).
+    # --no-install-daemon prevents the wizard from trying to install a host daemon.
+    run_cli onboard --no-install-daemon "$@"
+
+    # After setup, the wizard may have set/changed the gateway token in
+    # openclaw.json.  Sync it to .env and restart the gateway so the env-var
+    # and config file agree.
+    if sync_gateway_token; then
+        log_info "Gateway token updated by setup wizard. Syncing..."
+        local gw_container
+        gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" \
+            --format '{{.Names}}' | head -1)
+        if [[ -n "$gw_container" ]]; then
+            log_info "Restarting gateway to apply new token..."
+            cd "$PROJECT_ROOT"
+            docker compose -f "$MUSTANGCLAW_DIR/docker-compose.yml" \
+                -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" up -d openclaw-gateway
+        fi
+        # Clear device tokens invalidated by the token change
+        rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"* 2>/dev/null || true
+        log_info "Gateway restarted with updated token."
+    fi
+}
+
 # ─── TUI (inline) ─────────────────────────────────────────────────────────
 cmd_tui() {
+    # Clear stale device tokens to avoid mismatch errors on reconnect
+    rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"* 2>/dev/null || true
     run_cli tui "$@"
 }
 
 # ─── Status (inline) ───────────────────────────────────────────────────────
 cmd_status() {
+    local do_health=false
+    for arg in "$@"; do
+        case "$arg" in
+            --health) do_health=true ;;
+        esac
+    done
+
     printf "${_CYAN}── Local Container ──${_NC}\n"
     if command -v docker &>/dev/null; then
         local running
-        running=$(docker ps --filter "name=openclaw-gateway" --format '{{.Names}}  {{.Status}}  {{.Ports}}' 2>/dev/null || true)
+        running=$(docker ps --filter "name=^mustangclaw$" --format '{{.Names}}  {{.Status}}  {{.Ports}}' 2>/dev/null || true)
         if [[ -n "$running" ]]; then
             printf "${_GREEN}Running${_NC}  %s\n" "$running"
+
+            # Application-level health check
+            if [[ "$do_health" == "true" ]]; then
+                printf "\n${_CYAN}── Gateway Health ──${_NC}\n"
+                local env_file="$MUSTANGCLAW_DIR/.env"
+                local token=""
+                if [[ -f "$env_file" ]]; then
+                    token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
+                fi
+                local health_output
+                if health_output=$(docker exec mustangclaw node dist/index.js health --token "$token" 2>&1); then
+                    printf "${_GREEN}Healthy${_NC}  %s\n" "$health_output"
+                else
+                    printf "${_RED}Unhealthy${_NC}  %s\n" "$health_output"
+                fi
+            fi
         else
             printf "${_YELLOW}Not running${_NC}\n"
+            if [[ "$do_health" == "true" ]]; then
+                printf "${_YELLOW}Skipping health check — container not running${_NC}\n"
+            fi
         fi
     else
         printf "${_YELLOW}docker not found${_NC}\n"
@@ -101,13 +202,26 @@ case "$COMMAND" in
     build)   exec "$MUSTANGCLAW_ROOT/scripts/build.sh"       "$@" ;;
     run)     exec "$MUSTANGCLAW_ROOT/scripts/run-local.sh"    "$@" ;;
     tui)     cmd_tui "$@" ;;
-    setup)   run_cli configure "$@" ;;
+    setup)   cmd_setup "$@" ;;
     deploy)  exec "$MUSTANGCLAW_ROOT/scripts/deploy-do.sh"    "$@" ;;
     destroy) exec "$MUSTANGCLAW_ROOT/scripts/destroy-do.sh"   "$@" ;;
     sync)    exec "$MUSTANGCLAW_ROOT/scripts/sync-config.sh"  "$@" ;;
     upgrade) exec "$MUSTANGCLAW_ROOT/scripts/upgrade.sh"      "$@" ;;
     ssh)     exec "$MUSTANGCLAW_ROOT/scripts/ssh-do.sh"       "$@" ;;
-    status)  cmd_status ;;
+    sandbox) exec "$MUSTANGCLAW_ROOT/scripts/sandbox-build.sh" "$@" ;;
+    docker)
+        gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" --format '{{.Names}}' | head -1)
+        if [[ -z "$gw_container" ]]; then
+            log_error "Gateway container is not running. Start it with 'mustangclaw run'."
+            exit 1
+        fi
+        # Install 'openclaw' wrapper so the command works inside the shell
+        docker exec --user root "$gw_container" sh -c \
+            'printf "#!/bin/sh\ncd /app && exec node dist/index.js \"\$@\"\n" > /usr/local/bin/openclaw && chmod +x /usr/local/bin/openclaw'
+        exec docker exec -it "$gw_container" /bin/sh
+        ;;
+    rotate-tokens) exec "$MUSTANGCLAW_ROOT/scripts/rotate-tokens.sh" "$@" ;;
+    status)  cmd_status "$@" ;;
     help|--help|-h) usage ;;
     *)
         log_error "Unknown command: $COMMAND"

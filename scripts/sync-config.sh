@@ -55,7 +55,7 @@ fi
 if [[ "$TARGET" == "local" ]]; then
     require_cmd docker
 
-    CONTAINER="openclaw-gateway"
+    CONTAINER="mustangclaw"
 
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "[DRY RUN] Would copy $MUSTANGCLAW_CONFIG_DIR/. to $CONTAINER:/home/node/.mustangclaw/"
@@ -72,7 +72,11 @@ if [[ "$TARGET" == "local" ]]; then
 
     log_info "Restarting gateway..."
     cd "$PROJECT_ROOT"
-    docker compose -f "$MUSTANGCLAW_DIR/docker-compose.yml" restart openclaw-gateway
+    COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
+    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
+        COMPOSE_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
+    fi
+    docker compose "${COMPOSE_FILES[@]}" restart openclaw-gateway
 
     log_info "Config synced to local container."
     exit 0

@@ -73,8 +73,12 @@ if [[ "$TARGET" == "local" ]]; then
     docker build -t "$MUSTANGCLAW_IMAGE" "$MUSTANGCLAW_DIR"
 
     log_info "Restarting containers..."
-    docker compose -f "$MUSTANGCLAW_DIR/docker-compose.yml" down
-    docker compose -f "$MUSTANGCLAW_DIR/docker-compose.yml" up -d openclaw-gateway
+    COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
+    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
+        COMPOSE_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
+    fi
+    docker compose "${COMPOSE_FILES[@]}" down
+    docker compose "${COMPOSE_FILES[@]}" up -d openclaw-gateway
 
     log_info "Upgrade complete."
     log_info "  Previous: $OLD_SHA"

@@ -53,7 +53,11 @@ fi
 # ─── Stop mode ───────────────────────────────────────────────────────────────
 if [[ "$STOP" == "true" ]]; then
     log_info "Stopping MustangClaw gateway..."
-    docker compose -f "$MUSTANGCLAW_DIR/docker-compose.yml" down
+    STOP_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
+    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
+        STOP_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
+    fi
+    docker compose "${STOP_FILES[@]}" down
     log_info "Gateway stopped."
     exit 0
 fi
@@ -119,8 +123,13 @@ ENV_FILE="$MUSTANGCLAW_DIR/.env"
 GATEWAY_TOKEN=""
 
 if [[ -f "$OPENCLAW_JSON" ]]; then
-    GATEWAY_TOKEN=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$OPENCLAW_JSON" \
-        | tail -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/')
+    GATEWAY_TOKEN=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+    print(cfg.get('gateway',{}).get('auth',{}).get('token',''))
+except: pass
+" "$OPENCLAW_JSON" 2>/dev/null || true)
 fi
 
 if [[ -z "$GATEWAY_TOKEN" ]] && [[ -f "$ENV_FILE" ]] && grep -q '^OPENCLAW_GATEWAY_TOKEN=' "$ENV_FILE"; then
@@ -132,12 +141,32 @@ if [[ -z "$GATEWAY_TOKEN" ]]; then
     log_info "Generated new gateway token."
 fi
 
+# ─── Write token to openclaw.json ────────────────────────────────────────
+# Ensure openclaw.json carries the same token the gateway will use via the
+# OPENCLAW_GATEWAY_TOKEN env-var.  Keeps the two in sync from the start so
+# that 'mustangclaw setup' can later detect (and reconcile) any change.
+require_cmd python3
+python3 -c "
+import json, sys
+p, tok = sys.argv[1], sys.argv[2]
+with open(p, 'r') as f:
+    cfg = json.load(f)
+gw = cfg.setdefault('gateway', {})
+auth = gw.setdefault('auth', {})
+auth['mode'] = 'token'
+auth['token'] = tok
+with open(p, 'w') as f:
+    json.dump(cfg, f, indent=2)
+    f.write('\n')
+" "$OPENCLAW_JSON" "$GATEWAY_TOKEN"
+log_info "Wrote gateway token to openclaw.json."
+
 # ─── Write .env ──────────────────────────────────────────────────────────────
 # Keys must match what the upstream docker-compose.yml expects (OPENCLAW_*).
 # Preserve any existing extra env vars the user may have added.
 if [[ -f "$ENV_FILE" ]]; then
     # Remove lines we manage, keep everything else
-    EXISTING=$(grep -vE '^(OPENCLAW_IMAGE|OPENCLAW_GATEWAY_TOKEN|OPENCLAW_CONFIG_DIR|OPENCLAW_WORKSPACE_DIR)=' "$ENV_FILE" || true)
+    EXISTING=$(grep -vE '^(OPENCLAW_IMAGE|OPENCLAW_GATEWAY_TOKEN|OPENCLAW_CONFIG_DIR|OPENCLAW_WORKSPACE_DIR|OPENCLAW_GATEWAY_BIND)=' "$ENV_FILE" || true)
 else
     EXISTING=""
 fi
@@ -147,6 +176,7 @@ OPENCLAW_IMAGE=$MUSTANGCLAW_IMAGE
 OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN
 OPENCLAW_CONFIG_DIR=$MUSTANGCLAW_CONFIG_DIR
 OPENCLAW_WORKSPACE_DIR=$MUSTANGCLAW_WORKSPACE_DIR
+OPENCLAW_GATEWAY_BIND=lan
 EOF
 
 if [[ -n "$EXISTING" ]]; then
@@ -160,13 +190,48 @@ fi
 ENTRYPOINT_SRC="$PROJECT_ROOT/scripts/docker-entrypoint.sh"
 OVERRIDE_FILE="$MUSTANGCLAW_DIR/docker-compose.override.yml"
 
+# Build the extra volumes list
+EXTRA_VOLUMES=""
+
+# OPENCLAW_EXTRA_MOUNTS — comma-separated bind mounts (e.g. "/host/path:/container/path:ro")
+if [[ -n "${OPENCLAW_EXTRA_MOUNTS:-}" ]]; then
+    IFS=',' read -ra MOUNTS <<< "$OPENCLAW_EXTRA_MOUNTS"
+    for mount in "${MOUNTS[@]}"; do
+        mount="$(echo "$mount" | xargs)"   # trim whitespace
+        if [[ -n "$mount" ]]; then
+            EXTRA_VOLUMES="${EXTRA_VOLUMES}      - ${mount}"$'\n'
+        fi
+    done
+    log_info "Extra mounts: ${#MOUNTS[@]} bind mount(s) configured."
+fi
+
+# OPENCLAW_HOME_VOLUME — named Docker volume for /home/node persistence
+if [[ -n "${OPENCLAW_HOME_VOLUME:-}" ]]; then
+    if [[ ! "$OPENCLAW_HOME_VOLUME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+        log_error "Invalid OPENCLAW_HOME_VOLUME name: must match ^[A-Za-z0-9][A-Za-z0-9_.-]*\$"
+        exit 1
+    fi
+    EXTRA_VOLUMES="${EXTRA_VOLUMES}      - ${OPENCLAW_HOME_VOLUME}:/home/node"$'\n'
+    log_info "Home volume: ${OPENCLAW_HOME_VOLUME} -> /home/node"
+fi
+
 cat > "$OVERRIDE_FILE" <<YMLEOF
 services:
   openclaw-gateway:
+    container_name: mustangclaw
     volumes:
       - ${ENTRYPOINT_SRC}:/usr/local/bin/docker-entrypoint.sh:ro
-    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+${EXTRA_VOLUMES}    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
 YMLEOF
+
+# Append top-level volumes section if a named volume is used
+if [[ -n "${OPENCLAW_HOME_VOLUME:-}" ]]; then
+    cat >> "$OVERRIDE_FILE" <<YMLEOF
+
+volumes:
+  ${OPENCLAW_HOME_VOLUME}:
+YMLEOF
+fi
 
 COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
 

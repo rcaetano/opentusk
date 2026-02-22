@@ -234,6 +234,14 @@ chmod 600 /home/mustangclaw/mustangclaw/.env
 
 ${TAILSCALE_BLOCK}
 
+# ── Generate docker-compose override (container_name) ────────────────────
+cat > /home/mustangclaw/mustangclaw/docker-compose.override.yml <<'OVEOF'
+services:
+  openclaw-gateway:
+    container_name: mustangclaw
+OVEOF
+chown mustangclaw:mustangclaw /home/mustangclaw/mustangclaw/docker-compose.override.yml
+
 # ── Start containers ─────────────────────────────────────────────────────
 su - mustangclaw -c 'cd /home/mustangclaw/mustangclaw && docker compose up -d openclaw-gateway'
 
