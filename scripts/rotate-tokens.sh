@@ -43,85 +43,52 @@ done
 
 # ─── Full scope set (includes scopes added in 2026.2.19) ────────────────────
 SCOPES=(
+    operator.read
+    operator.write
     operator.admin
     operator.approvals
     operator.pairing
-    operator.write
-    operator.read
 )
 
 # ─── Prerequisites ──────────────────────────────────────────────────────────
 require_cmd docker
-require_cmd python3
-
-cd "$PROJECT_ROOT"
-
-if [[ ! -f "$MUSTANGCLAW_DIR/.env" ]]; then
-    log_error "No .env found. Run 'mustangclaw run' first to start the gateway."
-    exit 1
-fi
-
-source "$MUSTANGCLAW_DIR/.env"
-
-# ─── Resolve gateway token (same logic as run_cli) ─────────────────────────
-openclaw_json="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
-if [[ -f "$openclaw_json" ]]; then
-    json_token=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$openclaw_json" \
-        | tail -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' 2>/dev/null || true)
-    if [[ -n "${json_token:-}" ]]; then
-        OPENCLAW_GATEWAY_TOKEN="$json_token"
-    fi
-fi
 
 # ─── Detect gateway container ──────────────────────────────────────────────
-gw_container=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" \
+GW_CONTAINER=$(docker ps --filter "name=^mustangclaw$" --filter "status=running" \
     --format '{{.Names}}' | head -1)
 
-network_flag=()
-if [[ -n "$gw_container" ]]; then
-    network_flag=(--network "container:$gw_container")
-else
+if [[ -z "$GW_CONTAINER" ]]; then
     log_error "Gateway container is not running. Start it with 'mustangclaw run'."
     exit 1
 fi
 
-# ─── Helper: run openclaw CLI non-interactively ─────────────────────────────
+# ─── Helper: run openclaw CLI inside the gateway container ─────────────────
 _cli() {
-    docker run --rm \
-        ${network_flag[@]+"${network_flag[@]}"} \
-        -e HOME=/home/node \
-        -e OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN}" \
-        -v "${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw" \
-        -v "${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace" \
-        "$MUSTANGCLAW_IMAGE" \
-        node dist/index.js "$@"
+    docker exec "$GW_CONTAINER" node dist/index.js "$@"
 }
 
 # ─── List paired devices ───────────────────────────────────────────────────
 log_info "Listing paired devices..."
-devices_json=$(_cli devices list --json 2>/dev/null) || {
-    log_error "Failed to list devices. Is the gateway running and healthy?"
+devices_json=$(_cli devices list --json 2>&1) || {
+    log_error "Failed to list devices. Is the gateway healthy?"
+    echo "$devices_json"
     exit 1
 }
 
-# Parse device IDs and names from JSON
+# Parse device IDs and current scopes from JSON
 device_info=$(python3 -c "
 import json, sys
 try:
-    devices = json.loads(sys.stdin.read())
+    data = json.loads(sys.stdin.read())
 except json.JSONDecodeError:
     sys.exit(0)
-# Handle both array and {devices: [...]} formats
-if isinstance(devices, dict):
-    devices = devices.get('devices', devices.get('data', []))
-if not isinstance(devices, list):
-    sys.exit(0)
-for d in devices:
-    did = d.get('id', d.get('deviceId', ''))
-    name = d.get('name', d.get('label', 'unnamed'))
-    scopes = ','.join(d.get('scopes', d.get('scope', [])))
+paired = data.get('paired', [])
+for d in paired:
+    did = d.get('deviceId', '')
+    scopes = ', '.join(d.get('scopes', []))
+    client = d.get('clientId', 'unknown')
     if did:
-        print(f'{did}\t{name}\t{scopes}')
+        print(f'{did}\t{client}\t{scopes}')
 " <<< "$devices_json")
 
 if [[ -z "$device_info" ]]; then
@@ -134,8 +101,8 @@ device_count=$(echo "$device_info" | wc -l | tr -d ' ')
 log_info "Found $device_count paired device(s):"
 echo ""
 
-while IFS=$'\t' read -r dev_id dev_name dev_scopes; do
-    printf "  ${_CYAN}%-40s${_NC}  %s\n" "$dev_id" "$dev_name"
+while IFS=$'\t' read -r dev_id dev_client dev_scopes; do
+    printf "  ${_CYAN}%s${_NC}  (%s)\n" "$dev_id" "$dev_client"
     printf "    current scopes: %s\n" "${dev_scopes:-<none>}"
 done <<< "$device_info"
 
@@ -146,8 +113,8 @@ echo ""
 # ─── Dry-run mode ──────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "true" ]]; then
     log_info "[DRY RUN] Would rotate tokens for $device_count device(s)."
-    while IFS=$'\t' read -r dev_id dev_name dev_scopes; do
-        echo "  openclaw devices rotate --device $dev_id --role operator \\"
+    while IFS=$'\t' read -r dev_id dev_client dev_scopes; do
+        echo "  node dist/index.js devices rotate --device $dev_id --role operator \\"
         for scope in "${SCOPES[@]}"; do
             echo "    --scope $scope \\"
         done
@@ -167,18 +134,29 @@ echo ""
 failed=0
 succeeded=0
 
-while IFS=$'\t' read -r dev_id dev_name dev_scopes; do
+while IFS=$'\t' read -r dev_id dev_client dev_scopes; do
     scope_args=()
     for scope in "${SCOPES[@]}"; do
         scope_args+=(--scope "$scope")
     done
 
-    printf "  Rotating %-40s ... " "$dev_id"
-    if _cli devices rotate --device "$dev_id" --role operator "${scope_args[@]}" &>/dev/null; then
-        printf "${_GREEN}OK${_NC}\n"
+    printf "  Rotating %s (%s) ...\n" "$dev_id" "$dev_client"
+    rotate_output=""
+    if rotate_output=$(_cli devices rotate --device "$dev_id" --role operator "${scope_args[@]}" 2>&1); then
+        printf "    ${_GREEN}OK${_NC}\n"
+        if [[ -n "$rotate_output" ]]; then
+            echo "$rotate_output" | while IFS= read -r line; do
+                printf "    %s\n" "$line"
+            done
+        fi
         ((succeeded++))
     else
-        printf "${_RED}FAILED${_NC}\n"
+        printf "    ${_RED}FAILED${_NC}\n"
+        if [[ -n "$rotate_output" ]]; then
+            echo "$rotate_output" | while IFS= read -r line; do
+                printf "    %s\n" "$line"
+            done
+        fi
         ((failed++))
     fi
 done <<< "$device_info"
@@ -186,7 +164,8 @@ done <<< "$device_info"
 # ─── Summary ───────────────────────────────────────────────────────────────
 echo ""
 if [[ "$failed" -eq 0 ]]; then
-    log_info "All $succeeded device(s) rotated successfully. No restart required."
+    log_info "All $succeeded device(s) rotated successfully."
+    log_info "Use the returned device token in your client instead of the GATEWAY_TOKEN."
 else
     log_warn "$succeeded succeeded, $failed failed."
     log_warn "Re-run or manually rotate the failed devices."
