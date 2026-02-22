@@ -25,6 +25,8 @@ Commands:
   token     Show the current gateway token
   dashboard Open OpenClaw Control in the browser (with token)
   poseidon  Open Poseidon dashboard in the browser
+  save      Export Docker image to archive              [--output PATH] [--no-compress]
+  load      Import Docker image from archive           <FILE>
   restart   Restart the gateway container
   logs      Tail gateway container logs                [--lines N]
   docker    Open a shell inside the gateway container
@@ -285,6 +287,8 @@ case "$COMMAND" in
     upgrade) exec "$MUSTANGCLAW_ROOT/scripts/upgrade.sh"      "$@" ;;
     ssh)     exec "$MUSTANGCLAW_ROOT/scripts/ssh-do.sh"       "$@" ;;
     sandbox) exec "$MUSTANGCLAW_ROOT/scripts/sandbox-build.sh" "$@" ;;
+    save)    exec "$MUSTANGCLAW_ROOT/scripts/save.sh"          "$@" ;;
+    load)    exec "$MUSTANGCLAW_ROOT/scripts/load.sh"          "$@" ;;
     restart)
         log_info "Restarting gateway..."
         docker restart mustangclaw
