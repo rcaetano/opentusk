@@ -14,6 +14,8 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 ./mustangclaw tui       # launch TUI client (gateway must be running)
 ./mustangclaw token     # print the gateway token (for scripts or manual use)
 ./mustangclaw restart   # restart the gateway container
+./mustangclaw exec CMD  # run OpenClaw CLI command in the gateway (e.g. exec health)
+./mustangclaw docker    # open a shell inside the gateway container
 ./mustangclaw logs      # tail gateway container logs (--lines N)
 ./mustangclaw save      # export Docker image to mustangclaw-local.tar.gz
 ./mustangclaw load FILE # import Docker image from archive
@@ -178,3 +180,7 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 ```
 
 Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangclaw init`).
+
+When Tailscale is enabled, services are exposed via HTTPS on the tailnet:
+- **Poseidon** (primary): `https://<droplet>.<tailnet>.ts.net` (port 443)
+- **Gateway Control**: `https://<droplet>.<tailnet>.ts.net:8443` (port 8443)

@@ -106,6 +106,7 @@ Then provision via SSH:
 EOF
     if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         echo "  - Install Tailscale ($TAILSCALE_MODE mode)"
+        echo "    Poseidon on HTTPS 443, Gateway on HTTPS 8443"
     fi
     exit 0
 fi
@@ -172,13 +173,15 @@ tailscale up --auth-key='${TAILSCALE_AUTH_KEY}'
 "
     if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
         TAILSCALE_BLOCK="$TAILSCALE_BLOCK
-echo 'Configuring Tailscale Funnel...'
-tailscale funnel --bg ${GATEWAY_PORT}
+echo 'Configuring Tailscale Funnel (gateway on 8443) + Serve (Poseidon on 443)...'
+tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
+tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
 "
     elif [[ "$TAILSCALE_MODE" == "serve" ]]; then
         TAILSCALE_BLOCK="$TAILSCALE_BLOCK
-echo 'Configuring Tailscale Serve...'
-tailscale serve --bg ${GATEWAY_PORT}
+echo 'Configuring Tailscale Serve (gateway on 8443, Poseidon on 443)...'
+tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
+tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
 "
     fi
 fi
@@ -336,8 +339,9 @@ echo "  Gateway token:    ${GATEWAY_TOKEN:0:8}..."
 echo "  Gateway password: ${GATEWAY_PASSWORD:0:8}..."
 echo ""
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
-    echo "  Tailscale:   https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net"
-    echo "  Mode:        $TAILSCALE_MODE"
+    echo "  Tailscale:   $TAILSCALE_MODE mode"
+    echo "  Poseidon:    https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net"
+    echo "  Gateway:     https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net:8443"
     echo ""
 fi
 log_warn "Full credentials stored in $CREDS_FILE (chmod 600)."
