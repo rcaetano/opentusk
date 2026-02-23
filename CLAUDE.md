@@ -15,6 +15,8 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 ./mustangclaw token     # print the gateway token (for scripts or manual use)
 ./mustangclaw restart   # restart the gateway container
 ./mustangclaw logs      # tail gateway container logs (--lines N)
+./mustangclaw save      # export Docker image to mustangclaw-local.tar.gz
+./mustangclaw load FILE # import Docker image from archive
 ./mustangclaw status    # show local container & remote droplet status
 ./mustangclaw status --health  # include application-level gateway health check
 ./mustangclaw run --stop  # stop the gateway
@@ -31,6 +33,8 @@ scripts/
   run-local.sh           # docker compose up (seeds openclaw.json, patches for Docker)
   docker-entrypoint.sh   # container entrypoint — patches openclaw.json on every start
   sandbox-build.sh       # build sandbox images for agent tool isolation
+  save.sh                # export Docker image to tar.gz archive
+  load.sh                # import Docker image from tar/tar.gz archive
   rotate-tokens.sh       # rotate device tokens with full scope set
   deploy-do.sh           # provision DigitalOcean droplet
   destroy-do.sh          # tear down droplet
