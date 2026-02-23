@@ -129,21 +129,25 @@ log_info "Droplet created at $DROPLET_IP."
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 4: Wait for SSH
 # ═══════════════════════════════════════════════════════════════════════════════
-log_info "Waiting for SSH to become available..."
-MAX_WAIT=60
+log_info "Waiting for SSH and cloud-init to finish..."
+MAX_WAIT=300
 ELAPSED=0
-while ! ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-        "root@${DROPLET_IP}" true 2>/dev/null; do
+while true; do
+    # Try SSH; on success check if cloud-init has finished
+    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+            "root@${DROPLET_IP}" "cloud-init status --wait >/dev/null 2>&1 || sleep 1; true" 2>/dev/null; then
+        break
+    fi
     sleep 5
     ELAPSED=$((ELAPSED + 5))
     if [[ $ELAPSED -ge $MAX_WAIT ]]; then
-        log_error "SSH not available after ${MAX_WAIT}s. Check droplet status."
+        log_error "SSH/cloud-init not ready after ${MAX_WAIT}s. Check droplet status."
         exit 1
     fi
     printf "."
 done
 echo ""
-log_info "SSH is ready."
+log_info "SSH is ready and cloud-init complete."
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 5: Security hardening (runs as root)
@@ -199,6 +203,9 @@ ufw default allow outgoing
 ufw allow 22/tcp
 ufw --force enable
 
+# ── Symlink mustangclaw to PATH ─────────────────────────────────────────
+ln -sf /home/mustangclaw/mustangclaw/mustangclaw /usr/local/bin/mustangclaw
+
 # ── fail2ban ─────────────────────────────────────────────────────────────
 apt-get install -y fail2ban
 systemctl enable fail2ban
@@ -222,9 +229,17 @@ PROVISION
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Deploying MustangClaw wrapper to remote..."
 rsync -avz --progress -e "ssh" \
-    --exclude='openclaw/' --exclude='poseidon/' --exclude='.git/' \
+    --exclude='openclaw/' --exclude='.git/' \
     --exclude='node_modules/' --exclude='.mustangclaw/' \
     "$PROJECT_ROOT/" "mustangclaw@${DROPLET_IP}:/home/mustangclaw/mustangclaw/"
+
+# Rsync poseidon source separately (private repo, can't clone on remote)
+if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
+    log_info "Syncing Poseidon source to remote..."
+    rsync -avz --progress -e "ssh" \
+        --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
+        "$PROJECT_ROOT/poseidon/" "mustangclaw@${DROPLET_IP}:/home/mustangclaw/mustangclaw/poseidon/"
+fi
 
 log_info "Building Docker images and starting gateway on remote..."
 ssh "mustangclaw@${DROPLET_IP}" bash <<DEPLOY
@@ -232,8 +247,8 @@ set -euo pipefail
 cd /home/mustangclaw/mustangclaw
 chmod +x mustangclaw
 
-# Build (clones openclaw + poseidon, builds Docker images)
-./mustangclaw build
+# Build (clones openclaw, uses rsynced poseidon, builds Docker images)
+./mustangclaw build --no-pull
 
 # Seed config directory with correct permissions
 mkdir -p /home/mustangclaw/.mustangclaw/workspace

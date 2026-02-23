@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─── Resolve repo root ─────────────────────────────────────────────────────
-MUSTANGCLAW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MUSTANGCLAW_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 source "$MUSTANGCLAW_ROOT/scripts/config.sh"
 
 # ─── Help ───────────────────────────────────────────────────────────────────
@@ -29,6 +29,7 @@ Commands:
   load      Import Docker image from archive           <FILE>
   restart   Restart the gateway container
   logs      Tail gateway container logs                [--lines N]
+  exec      Run an OpenClaw CLI command in the gateway       e.g. exec health
   docker    Open a shell inside the gateway container
   rotate-tokens  Rotate all device tokens with full scope set (2026.2.19 fix)
   status    Show local container & remote droplet status  [--health]
@@ -313,6 +314,10 @@ case "$COMMAND" in
         docker exec --user root "$gw_container" sh -c \
             'printf "#!/bin/sh\ncd /app && exec node dist/index.js \"\$@\"\n" > /usr/local/bin/openclaw && chmod +x /usr/local/bin/openclaw'
         exec docker exec -it "$gw_container" /bin/sh
+        ;;
+    exec)
+        gw_container=$(require_running_gateway)
+        exec docker exec -it "$gw_container" node dist/index.js "$@"
         ;;
     rotate-tokens) exec "$MUSTANGCLAW_ROOT/scripts/rotate-tokens.sh" "$@" ;;
     status)  cmd_status "$@" ;;
