@@ -58,9 +58,28 @@ if [[ ! -d "$MUSTANGCLAW_DIR" ]]; then
     git clone "$MUSTANGCLAW_REPO" "$MUSTANGCLAW_DIR"
 elif [[ "$NO_PULL" == "false" ]]; then
     log_info "Updating MustangClaw repository..."
+    # Stash local patches (e.g. upstream build fixes), pull, then reapply
+    local_changes=false
+    if ! git -C "$MUSTANGCLAW_DIR" diff --quiet 2>/dev/null; then
+        local_changes=true
+        git -C "$MUSTANGCLAW_DIR" stash --quiet
+    fi
     git -C "$MUSTANGCLAW_DIR" pull
+    if [[ "$local_changes" == "true" ]]; then
+        if git -C "$MUSTANGCLAW_DIR" stash pop --quiet 2>/dev/null; then
+            log_info "Re-applied local patches."
+        else
+            log_warn "Local patches conflict with upstream — dropped. You may need to re-patch."
+            git -C "$MUSTANGCLAW_DIR" checkout -- .
+        fi
+    fi
 else
     log_info "Skipping git pull (--no-pull)."
+fi
+
+if [[ -n "${MUSTANGCLAW_REF:-}" ]]; then
+    log_info "Pinning MustangClaw to ref $MUSTANGCLAW_REF..."
+    git -C "$MUSTANGCLAW_DIR" checkout "$MUSTANGCLAW_REF"
 fi
 
 # ─── Build Docker image ─────────────────────────────────────────────────────
@@ -83,6 +102,7 @@ if [[ ! -d "$POSEIDON_DIR" ]]; then
     git clone "$POSEIDON_REPO" "$POSEIDON_DIR"
 elif [[ "$NO_PULL" == "false" ]]; then
     log_info "Updating Poseidon repository..."
+    git -C "$POSEIDON_DIR" reset --hard HEAD
     git -C "$POSEIDON_DIR" pull
 else
     log_info "Skipping Poseidon git pull (--no-pull)."

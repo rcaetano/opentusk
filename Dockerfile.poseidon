@@ -16,6 +16,7 @@ RUN bun install -g pnpm
 COPY poseidon/package.json poseidon/pnpm-lock.yaml poseidon/pnpm-workspace.yaml ./
 COPY poseidon/apps/web/package.json ./apps/web/
 COPY poseidon/apps/api/package.json ./apps/api/
+COPY poseidon/packages/types/package.json ./packages/types/
 RUN pnpm install --frozen-lockfile
 
 # Now copy full source and build

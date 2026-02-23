@@ -4,6 +4,7 @@
 
 # ─── Repository & Image ─────────────────────────────────────────────────────
 MUSTANGCLAW_REPO="https://github.com/openclaw/openclaw.git"
+MUSTANGCLAW_REF=""                                # pinned commit (empty = latest main)
 MUSTANGCLAW_DIR="./openclaw"                      # local clone path (relative to project root)
 MUSTANGCLAW_IMAGE="mustangclaw:local"
 MUSTANGCLAW_CONFIG_DIR="$HOME/.mustangclaw"
