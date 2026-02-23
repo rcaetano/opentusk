@@ -189,6 +189,16 @@ fi
 ssh "root@${DROPLET_IP}" bash <<PROVISION
 set -euo pipefail
 
+# ── Swap (prevents OOM during Docker builds on small droplets) ──────────────
+if [[ ! -f /swapfile ]]; then
+    echo "Creating 2G swap..."
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 # ── Create mustangclaw user ─────────────────────────────────────────────────
 if ! id mustangclaw &>/dev/null; then
     useradd -m -s /bin/bash -G docker mustangclaw
@@ -302,11 +312,24 @@ else
     SMOKE_OK=false
 fi
 
-# Check gateway port is listening
-if ssh "mustangclaw@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
-    log_info "  Gateway port ${GATEWAY_PORT}: responding"
+# Check gateway port is listening (gateway takes ~60s to initialize)
+log_info "  Waiting up to 90s for gateway to start..."
+GW_READY=false
+GW_ELAPSED=0
+while [[ $GW_ELAPSED -lt 90 ]]; do
+    if ssh "mustangclaw@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
+        GW_READY=true
+        break
+    fi
+    sleep 5
+    GW_ELAPSED=$((GW_ELAPSED + 5))
+    printf "."
+done
+echo ""
+if [[ "$GW_READY" == "true" ]]; then
+    log_info "  Gateway port ${GATEWAY_PORT}: responding (took ~${GW_ELAPSED}s)"
 else
-    log_warn "  Gateway port ${GATEWAY_PORT}: not responding yet (may still be starting)"
+    log_warn "  Gateway port ${GATEWAY_PORT}: not responding after 90s — may need more time"
 fi
 
 if [[ "$SMOKE_OK" != "true" ]]; then

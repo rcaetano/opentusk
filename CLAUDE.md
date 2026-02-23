@@ -30,7 +30,7 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 mustangclaw              # CLI entry point — dispatches subcommands to scripts/
 scripts/
   config.sh              # shared variables, colors, helpers (sourced by all scripts)
-  init.sh                # interactive wizard for MustangClaw config
+  init.sh                # interactive wizard for MustangClaw config (ports, DO, Tailscale)
   build.sh               # git clone + docker build (supports --browser, --apt)
   run-local.sh           # docker compose up (seeds openclaw.json, patches for Docker)
   docker-entrypoint.sh   # container entrypoint — patches openclaw.json on every start
@@ -54,7 +54,7 @@ poseidon/                # upstream poseidon repo (git-ignored, created by build
 There are two layers of config:
 
 ### 1. MustangClaw config (`~/.mustangclaw/config.env`)
-Written by `mustangclaw init`. Controls ports, DigitalOcean settings. Sourced by `scripts/config.sh` to override defaults.
+Written by `mustangclaw init`. Controls ports, DigitalOcean settings, and Tailscale configuration. Sourced by `scripts/config.sh` to override defaults.
 
 ### 2. OpenClaw config (`~/.mustangclaw/openclaw.json`)
 Written by `mustangclaw setup` (OpenClaw's onboarding wizard). Controls API keys, models, gateway auth. Mounted into the Docker container at `/home/node/.openclaw/`.
@@ -67,6 +67,9 @@ Key variables from `scripts/config.sh`:
 - `GATEWAY_PORT` / `BRIDGE_PORT` / `POSEIDON_PORT` — Docker port mappings (18789 / 18790 / 18791)
 - `POSEIDON_REPO` — Poseidon git URL
 - `POSEIDON_DIR` — local Poseidon clone path (`./poseidon`)
+- `TAILSCALE_ENABLED` — enable Tailscale on deploy (`true`/`false`)
+- `TAILSCALE_AUTH_KEY` — reusable auth key (`tskey-auth-...`) for automated deploy; if invalid, `tailscale up` will print a browser login URL as fallback
+- `TAILSCALE_MODE` — `"serve"` (tailnet-only) or `"funnel"` (public internet)
 
 ## Poseidon Dev Mode
 
@@ -167,6 +170,9 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 - **"session file locked" in dashboard chat**: Stale lock file from unclean shutdown. Remove it: `docker exec mustangclaw rm /home/node/.openclaw/agents/main/sessions/*.lock`
 - **Token mismatch between .env and openclaw.json**: `mustangclaw run` reads the token from `openclaw.json` to keep them aligned
 - **Gateway unhealthy but container running**: Run `mustangclaw status --health` to check application-level health
+- **Deploy fails at "tailscale up"**: The auth key is invalid or expired. SSH into the droplet as root and run `tailscale up` interactively (browser login), then configure serve manually (see Tailscale section above)
+- **Poseidon unreachable over Tailscale**: Check `tailscale serve status` on the droplet. If empty, reconfigure: `tailscale serve --bg --https=443 http://localhost:18791`
+- **Tailscale hostname has "-1" suffix**: Another device with the same name exists on your tailnet. Remove the old device from Tailscale admin or use the suffixed name
 
 ## DigitalOcean Deployment
 
@@ -181,6 +187,26 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 
 Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangclaw init`).
 
-When Tailscale is enabled, services are exposed via HTTPS on the tailnet:
+### Tailscale
+
+When Tailscale is enabled (`mustangclaw init` or manually in `config.env`), the deploy script installs Tailscale and configures `tailscale serve`:
 - **Poseidon** (primary): `https://<droplet>.<tailnet>.ts.net` (port 443)
 - **Gateway Control**: `https://<droplet>.<tailnet>.ts.net:8443` (port 8443)
+
+The droplet's Tailscale hostname may get a `-N` suffix (e.g., `mustangclaw-1`) if a device with the same name already exists on the tailnet. Check `tailscale status` to see the actual hostname.
+
+If the auth key is invalid or expired, `tailscale up` will fail and the deploy aborts. As a fallback, SSH into the droplet and run `tailscale up` interactively — it will print a browser login URL. Then configure serve manually:
+
+```bash
+ssh root@<droplet-ip>
+tailscale up                                            # prints browser auth URL
+tailscale serve --bg --https=443 http://localhost:18791  # Poseidon
+tailscale serve --bg --https=8443 http://localhost:18789 # Gateway
+```
+
+### Deployment Notes
+
+- The `docker-20-04` DO image slug maps to **Docker on Ubuntu 22.04** (not 20.04 — DigitalOcean reuses the slug)
+- The deploy creates a 2GB swap file to prevent OOM during Docker builds on smaller droplets
+- The recommended droplet size is `s-4vcpu-8gb`; smaller sizes may OOM during the ~5 minute Docker build
+- The gateway takes **~60 seconds** to initialize after `mustangclaw run`; the deploy's smoke test may show "not responding yet" — this is normal

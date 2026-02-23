@@ -37,6 +37,10 @@ After setup, run `mustangclaw dashboard` to open OpenClaw Control. It auto-appro
 | `mustangclaw sandbox` | Build sandbox images for agent isolation |
 | `mustangclaw docker` | Open a shell inside the gateway container |
 | `mustangclaw rotate-tokens` | Rotate device tokens with full scope set |
+| `mustangclaw poseidon` | Open Poseidon agent dashboard in browser |
+| `mustangclaw exec CMD` | Run an OpenClaw CLI command in the gateway (e.g. `exec health`) |
+| `mustangclaw save` | Export Docker image to `mustangclaw-local.tar.gz` |
+| `mustangclaw load FILE` | Import Docker image from archive |
 | `mustangclaw deploy` | Create & provision DigitalOcean droplet |
 | `mustangclaw destroy` | Tear down droplet |
 | `mustangclaw sync` | Push config to local container or remote |
@@ -153,6 +157,15 @@ The dashboard command clears stale device tokens, opens the browser with the cor
 
 Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangclaw init`).
 
+### Tailscale
+
+`mustangclaw init` optionally configures Tailscale for remote access. When enabled, the deploy script installs Tailscale on the droplet and exposes services via HTTPS:
+
+- **Poseidon**: `https://<droplet>.<tailnet>.ts.net` (port 443)
+- **Gateway Control**: `https://<droplet>.<tailnet>.ts.net:8443` (port 8443)
+
+Requires a Tailscale auth key (`tskey-auth-...`) from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys). If the key is invalid, SSH into the droplet and run `tailscale up` for interactive browser login.
+
 ## Configuration
 
 Two layers of config:
@@ -176,3 +189,6 @@ Two layers of config:
 | TUI "gateway not connected" | Ensure gateway is running (`mustangclaw status`), then clear `~/.mustangclaw/devices/` |
 | Token mismatch between .env and openclaw.json | `mustangclaw run` reads the token from `openclaw.json` to keep them aligned |
 | Gateway unhealthy but container running | Run `mustangclaw status --health` for application-level diagnostics |
+| Gateway "not responding" right after deploy | Normal — the gateway takes ~60s to initialize. Wait and retry |
+| Deploy fails at "tailscale up" | Auth key is invalid/expired. SSH in as root, run `tailscale up` interactively |
+| Poseidon unreachable over Tailscale | Run `tailscale serve status` on droplet; reconfigure if empty |

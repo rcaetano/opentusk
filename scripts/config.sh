@@ -22,7 +22,7 @@ POSEIDON_PORT=18791
 # ─── DigitalOcean ────────────────────────────────────────────────────────────
 DO_DROPLET_NAME="mustangclaw"
 DO_REGION="fra1"
-DO_SIZE="s-2vcpu-4gb"
+DO_SIZE="s-4vcpu-8gb"
 DO_IMAGE="docker-20-04"
 DO_SSH_KEY_FINGERPRINT=""                   # auto-detected or set manually
 DO_TAG="mustangclaw"

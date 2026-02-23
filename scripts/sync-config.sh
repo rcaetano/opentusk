@@ -58,17 +58,17 @@ if [[ "$TARGET" == "local" ]]; then
     CONTAINER="mustangclaw"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY RUN] Would copy $MUSTANGCLAW_CONFIG_DIR/. to $CONTAINER:/home/node/.mustangclaw/"
-        log_info "[DRY RUN] Would chown -R 1000:1000 /home/node/.mustangclaw inside container"
+        log_info "[DRY RUN] Would copy $MUSTANGCLAW_CONFIG_DIR/. to $CONTAINER:/home/node/.openclaw/"
+        log_info "[DRY RUN] Would chown -R 1000:1000 /home/node/.openclaw inside container"
         log_info "[DRY RUN] Would restart $CONTAINER"
         exit 0
     fi
 
     log_info "Copying $MUSTANGCLAW_CONFIG_DIR to local container..."
-    docker cp "$MUSTANGCLAW_CONFIG_DIR/." "$CONTAINER:/home/node/.mustangclaw/"
+    docker cp "$MUSTANGCLAW_CONFIG_DIR/." "$CONTAINER:/home/node/.openclaw/"
 
     log_info "Fixing ownership..."
-    docker exec "$CONTAINER" chown -R 1000:1000 /home/node/.mustangclaw
+    docker exec "$CONTAINER" chown -R 1000:1000 /home/node/.openclaw
 
     log_info "Restarting gateway..."
     cd "$PROJECT_ROOT"
