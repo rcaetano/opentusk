@@ -10,7 +10,7 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Upgrade MustangClaw by pulling the latest code and rebuilding the Docker image.
-Configuration in ~/.mustangclaw is never touched.
+Remote ~/.mustangclaw is never overwritten if it exists; seeded from local if absent.
 
 Options:
   --target TARGET   "local" (default) or "remote"
@@ -127,6 +127,20 @@ if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
     rsync -avz --progress -e "ssh" \
         --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
         "$PROJECT_ROOT/poseidon/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/poseidon/"
+fi
+
+# Seed remote config from local if it doesn't exist yet (NEVER overwrite existing)
+REMOTE_CONFIG_EXISTS=$(ssh "mustangclaw@${IP}" '[[ -d /home/mustangclaw/.mustangclaw ]] && echo yes || echo no')
+if [[ "$REMOTE_CONFIG_EXISTS" == "no" ]]; then
+    if [[ -d "$MUSTANGCLAW_CONFIG_DIR" ]]; then
+        log_info "Remote ~/.mustangclaw not found — seeding from local config..."
+        rsync -avz --progress -e "ssh" \
+            "$MUSTANGCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.mustangclaw/"
+    else
+        log_warn "Remote ~/.mustangclaw not found and no local config to seed."
+    fi
+else
+    log_info "Remote ~/.mustangclaw exists — preserving remote config (not overwriting)."
 fi
 
 # Run upgrade on remote: pull openclaw, rebuild images (poseidon uses rsynced source),

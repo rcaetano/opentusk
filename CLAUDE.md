@@ -200,6 +200,8 @@ Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangcla
 
 `~/.mustangclaw` (host) is a bind mount — it is **never** inside the Docker image and is preserved across rebuilds and restarts. Upgrades only rebuild the image and restart the container.
 
+**Remote config is never overwritten.** When upgrading a remote droplet, if `~/.mustangclaw` already exists on the remote it is left untouched. If it doesn't exist (e.g., the droplet was recreated), it is seeded from the local `~/.mustangclaw`. Use `mustangclaw sync --target remote` to explicitly push local config to the remote.
+
 ```bash
 # Local: pull latest OpenClaw + Poseidon, rebuild, restart
 ./mustangclaw upgrade
