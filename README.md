@@ -45,6 +45,7 @@ After setup, run `mustangclaw dashboard` to open OpenClaw Control. It auto-appro
 | `mustangclaw destroy` | Tear down droplet |
 | `mustangclaw sync` | Push config to local container or remote |
 | `mustangclaw upgrade` | Pull latest & rebuild (local or remote) |
+| `mustangclaw audit` | Full sanity check of the setup (`--remote`, `--fix`) |
 | `mustangclaw ssh` | SSH into droplet |
 
 Run `mustangclaw <command> --help` for detailed usage of any command.
@@ -137,11 +138,14 @@ VITE_API_TARGET=http://localhost:3001 pnpm dev:web   # target a local API instea
 
 The dashboard command clears stale device tokens, opens the browser with the correct `/#token=` URL, then auto-approves the browser's device pairing request. If you still see "pairing required" or "device token mismatch", clear your browser's localStorage for `localhost:18789` and run `mustangclaw dashboard` again.
 
-## Health Check
+## Health Check & Audit
 
 ```bash
 ./mustangclaw status            # container-level status
 ./mustangclaw status --health   # also run application-level gateway health check
+./mustangclaw audit             # full sanity check (config, scripts, Docker, repos, connectivity)
+./mustangclaw audit --remote    # include remote droplet & Tailscale checks
+./mustangclaw audit --fix       # attempt to auto-fix common issues
 ```
 
 ## DigitalOcean Deployment
@@ -152,10 +156,23 @@ The dashboard command clears stale device tokens, opens the browser with the cor
 ./mustangclaw sync              # push ~/.mustangclaw config to remote
 ./mustangclaw ssh --tunnel      # SSH with port forwarding for gateway UI
 ./mustangclaw upgrade --target remote  # pull latest & rebuild on droplet
+./mustangclaw audit --remote    # full sanity check including remote droplet
 ./mustangclaw destroy           # tear down droplet
 ```
 
 Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangclaw init`).
+
+### Upgrading
+
+Config in `~/.mustangclaw` is a bind mount on the host — it is **never** inside the Docker image and is preserved across rebuilds and restarts.
+
+```bash
+./mustangclaw upgrade                     # local: pull latest, rebuild, restart
+./mustangclaw upgrade --target remote     # remote: rsync + pull + rebuild + restart
+./mustangclaw upgrade --target remote --rollback  # revert remote to previous commit
+```
+
+The remote upgrade rsyncs Poseidon source from your local machine (private repo), then pulls OpenClaw and rebuilds on the droplet.
 
 ### Tailscale
 
@@ -194,3 +211,6 @@ Two layers of config:
 | Gateway "not responding" right after deploy | Normal — the gateway takes ~60s to initialize. Wait and retry |
 | Deploy fails at "tailscale up" | Auth key is invalid/expired. SSH in as root, run `tailscale up` interactively |
 | Poseidon unreachable over Tailscale | Run `tailscale serve status` on droplet; reconfigure if empty |
+| Gateway fails with "non-loopback Control UI requires allowedOrigins" | Run `mustangclaw run` — it auto-patches this. If on old image, rebuild with `mustangclaw build` |
+| Remote fails with "Unrecognized key: controlUi" | Remote image is older than local scripts. Run `mustangclaw upgrade --target remote` |
+| Tailscale serve uses old hostname after rename | Run `tailscale serve reset` on droplet, then reconfigure serve entries |
