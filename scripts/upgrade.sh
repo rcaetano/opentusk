@@ -74,20 +74,24 @@ if [[ "$TARGET" == "local" ]]; then
 
     # ─── Update Poseidon ──────────────────────────────────────────────────
     if [[ -d "$POSEIDON_DIR" ]]; then
-        if [[ "$ROLLBACK" == "true" ]]; then
-            git -C "$POSEIDON_DIR" checkout HEAD~1
+        if [[ -d "$POSEIDON_DIR/.git" ]]; then
+            if [[ "$ROLLBACK" == "true" ]]; then
+                git -C "$POSEIDON_DIR" checkout HEAD~1
+            else
+                log_info "Pulling latest Poseidon changes..."
+                git -C "$POSEIDON_DIR" pull
+            fi
         else
-            log_info "Pulling latest Poseidon changes..."
-            git -C "$POSEIDON_DIR" pull
+            log_info "Poseidon directory is not a git repo (rsynced copy) — skipping pull."
         fi
         log_info "Rebuilding Poseidon overlay..."
         docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$MUSTANGCLAW_IMAGE" "$PROJECT_ROOT"
     fi
 
-    log_info "Restarting containers..."
-    set_compose_files
-    docker compose "${COMPOSE_FILES[@]}" down
-    docker compose "${COMPOSE_FILES[@]}" up -d openclaw-gateway
+    # Restart via 'mustangclaw run' to apply config patches (bind=lan, token sync, etc.)
+    log_info "Restarting gateway..."
+    "$PROJECT_ROOT/scripts/run-local.sh" --stop
+    "$PROJECT_ROOT/scripts/run-local.sh"
 
     log_info "Upgrade complete."
     log_info "  Previous: $OLD_SHA"
@@ -110,14 +114,23 @@ else
     log_info "Upgrading remote at $IP..."
 fi
 
-# Sync wrapper scripts to remote
+# Sync wrapper scripts to remote (excluding repos — they're handled separately)
 log_info "Syncing wrapper project to remote..."
 rsync -avz --progress -e "ssh" \
     --exclude='openclaw/' --exclude='poseidon/' --exclude='.git/' \
     --exclude='node_modules/' --exclude='.mustangclaw/' \
     "$PROJECT_ROOT/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/"
 
-# Run upgrade via the wrapper CLI on remote
+# Sync poseidon source to remote (private repo — can't git clone on remote)
+if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
+    log_info "Syncing Poseidon source to remote..."
+    rsync -avz --progress -e "ssh" \
+        --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
+        "$PROJECT_ROOT/poseidon/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/poseidon/"
+fi
+
+# Run upgrade on remote: pull openclaw, rebuild images (poseidon uses rsynced source),
+# and restart with config patching via 'mustangclaw run'.
 ROLLBACK_FLAG=""
 if [[ "$ROLLBACK" == "true" ]]; then
     ROLLBACK_FLAG="--rollback"
