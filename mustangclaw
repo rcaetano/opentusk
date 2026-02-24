@@ -96,8 +96,193 @@ sync_gateway_token() {
     return 0
 }
 
+# ─── Setup helpers ────────────────────────────────────────────────────────
+
+# Poll the gateway HTTP endpoint until it responds or timeout expires.
+# Usage: wait_gateway_healthy [timeout_seconds]
+wait_gateway_healthy() {
+    local timeout="${1:-30}"
+    local i=0
+    while [[ $i -lt $timeout ]]; do
+        if curl -sf -o /dev/null --max-time 2 "http://localhost:${GATEWAY_PORT}"; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# Pre-flight checks before launching the setup wizard.
+setup_preflight() {
+    local checks_pass=0 checks_fail=0
+    printf "\n${_CYAN}── Pre-flight Checks ──${_NC}\n"
+
+    # 1. Docker installed
+    if command -v docker &>/dev/null; then
+        printf "${_GREEN}  [OK]${_NC} Docker installed\n"
+        checks_pass=$((checks_pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} Docker is not installed\n"
+        checks_fail=$((checks_fail + 1))
+        log_error "Install Docker before running setup."
+        return 1
+    fi
+
+    # 2. Docker image exists
+    if [[ -n "$(docker images "$MUSTANGCLAW_IMAGE" -q 2>/dev/null)" ]]; then
+        printf "${_GREEN}  [OK]${_NC} Docker image '$MUSTANGCLAW_IMAGE' exists\n"
+        checks_pass=$((checks_pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} Docker image '$MUSTANGCLAW_IMAGE' not found\n"
+        checks_fail=$((checks_fail + 1))
+        log_error "Run 'mustangclaw build' first to build the Docker image."
+        return 1
+    fi
+
+    # 3. .env file exists (gateway has been started at least once)
+    if [[ -f "$MUSTANGCLAW_DIR/.env" ]]; then
+        printf "${_GREEN}  [OK]${_NC} Gateway .env file exists\n"
+        checks_pass=$((checks_pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} No .env file found at $MUSTANGCLAW_DIR/.env\n"
+        checks_fail=$((checks_fail + 1))
+        log_error "Run 'mustangclaw run' first to start the gateway."
+        return 1
+    fi
+
+    # 4. Gateway container is running
+    local gw_container
+    gw_container=$(get_running_gateway)
+    if [[ -n "$gw_container" ]]; then
+        printf "${_GREEN}  [OK]${_NC} Gateway container is running ($gw_container)\n"
+        checks_pass=$((checks_pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} Gateway container is not running\n"
+        checks_fail=$((checks_fail + 1))
+        log_error "Start the gateway with 'mustangclaw run' before running setup."
+        return 1
+    fi
+
+    # 5. Gateway is healthy (HTTP responding)
+    printf "${_CYAN}  [..]${_NC} Waiting for gateway to be healthy...\r"
+    if wait_gateway_healthy 30; then
+        printf "${_GREEN}  [OK]${_NC} Gateway is responding on port $GATEWAY_PORT\n"
+        checks_pass=$((checks_pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} Gateway not responding on port $GATEWAY_PORT after 30s\n"
+        checks_fail=$((checks_fail + 1))
+        log_error "Gateway is running but not responding. Check 'mustangclaw logs' for errors."
+        return 1
+    fi
+
+    # 6. Backup openclaw.json
+    local json_file="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+    if [[ -f "$json_file" ]]; then
+        local backup_file="${json_file}.bak"
+        cp "$json_file" "$backup_file"
+        printf "${_GREEN}  [OK]${_NC} Config backed up to $backup_file\n"
+        checks_pass=$((checks_pass + 1))
+    else
+        printf "${_YELLOW}  [--]${_NC} No openclaw.json to back up (first-time setup)\n"
+    fi
+
+    printf "${_GREEN}All pre-flight checks passed ($checks_pass/$checks_pass).${_NC}\n\n"
+    return 0
+}
+
+# Post-setup validation after the wizard and token sync.
+setup_validate() {
+    local pass=0 warn_count=0 fail_count=0
+    printf "\n${_CYAN}── Post-setup Validation ──${_NC}\n"
+
+    local json_file="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+    local env_file="$MUSTANGCLAW_DIR/.env"
+
+    # 1. JSON valid
+    if [[ -f "$json_file" ]] && python3 -c "import json; json.load(open('$json_file'))" 2>/dev/null; then
+        printf "${_GREEN}  [PASS]${_NC} openclaw.json is valid JSON\n"
+        pass=$((pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} openclaw.json is missing or invalid JSON\n"
+        fail_count=$((fail_count + 1))
+    fi
+
+    # 2. Gateway token present in config
+    local json_token
+    json_token=$(read_json_token)
+    if [[ -n "$json_token" ]]; then
+        printf "${_GREEN}  [PASS]${_NC} Gateway token present in openclaw.json\n"
+        pass=$((pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} No gateway token found in openclaw.json\n"
+        fail_count=$((fail_count + 1))
+    fi
+
+    # 3. Token synced between openclaw.json and .env
+    if [[ -n "$json_token" && -f "$env_file" ]]; then
+        local env_token
+        env_token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$env_file" | cut -d= -f2-)
+        if [[ "$json_token" == "$env_token" ]]; then
+            printf "${_GREEN}  [PASS]${_NC} Token in sync between openclaw.json and .env\n"
+            pass=$((pass + 1))
+        else
+            printf "${_RED}  [FAIL]${_NC} Token mismatch between openclaw.json and .env\n"
+            fail_count=$((fail_count + 1))
+        fi
+    fi
+
+    # 4. Gateway responding (may be restarting after token change)
+    printf "${_CYAN}  [..]${_NC} Waiting for gateway to be healthy...\r"
+    if wait_gateway_healthy 30; then
+        printf "${_GREEN}  [PASS]${_NC} Gateway is responding on port $GATEWAY_PORT\n"
+        pass=$((pass + 1))
+    else
+        printf "${_RED}  [FAIL]${_NC} Gateway not responding on port $GATEWAY_PORT after 30s\n"
+        fail_count=$((fail_count + 1))
+    fi
+
+    # 5. Poseidon responding (optional — warn only)
+    if curl -sf -o /dev/null --max-time 2 "http://localhost:${POSEIDON_PORT}"; then
+        printf "${_GREEN}  [PASS]${_NC} Poseidon is responding on port $POSEIDON_PORT\n"
+        pass=$((pass + 1))
+    else
+        printf "${_YELLOW}  [WARN]${_NC} Poseidon not responding on port $POSEIDON_PORT\n"
+        warn_count=$((warn_count + 1))
+    fi
+
+    # 6. Summary
+    printf "\n${_CYAN}── Summary ──${_NC}\n"
+    printf "  ${_GREEN}$pass passed${_NC}"
+    if [[ $warn_count -gt 0 ]]; then
+        printf ", ${_YELLOW}$warn_count warning(s)${_NC}"
+    fi
+    if [[ $fail_count -gt 0 ]]; then
+        printf ", ${_RED}$fail_count failed${_NC}"
+    fi
+    printf "\n"
+
+    # Hint about backup if validation failed
+    if [[ $fail_count -gt 0 && -f "${json_file}.bak" ]]; then
+        log_warn "A backup of your previous config is at: ${json_file}.bak"
+        log_warn "Restore with: cp '${json_file}.bak' '$json_file'"
+    fi
+
+    # Next steps
+    if [[ $fail_count -eq 0 ]]; then
+        printf "\n${_GREEN}Setup complete!${_NC} Next steps:\n"
+        printf "  mustangclaw dashboard   Open the web dashboard\n"
+        printf "  mustangclaw tui         Launch the terminal client\n"
+        printf "  mustangclaw poseidon    Open the Poseidon agent dashboard\n"
+    fi
+    echo ""
+}
+
 # ─── Setup (inline) ──────────────────────────────────────────────────────
 cmd_setup() {
+    # Pre-flight checks
+    setup_preflight
+
     # Use 'onboard' — the Docker-native wizard (official docker-setup.sh uses this).
     # --no-install-daemon prevents the wizard from trying to install a host daemon.
     run_cli onboard --no-install-daemon "$@"
@@ -119,6 +304,9 @@ cmd_setup() {
         rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"* 2>/dev/null || true
         log_info "Gateway restarted with updated token."
     fi
+
+    # Post-setup validation
+    setup_validate
 }
 
 # ─── TUI (inline) ─────────────────────────────────────────────────────────
