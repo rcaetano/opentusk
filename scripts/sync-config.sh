@@ -105,7 +105,7 @@ fi
 log_info "Fixing ownership and restarting gateway on remote..."
 ssh "mustangclaw@${IP}" '
     sudo chown -R 1000:1000 /home/mustangclaw/.mustangclaw
-    cd /home/mustangclaw/mustangclaw && docker compose restart openclaw-gateway
+    docker restart mustangclaw
 '
 
 log_info "Config synced to remote droplet at $IP."

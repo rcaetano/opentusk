@@ -40,7 +40,7 @@ scripts/
   rotate-tokens.sh       # rotate device tokens with full scope set
   deploy-do.sh           # provision DigitalOcean droplet
   destroy-do.sh          # tear down droplet
-  sync-config.sh         # rsync ~/.mustangclaw to local container or remote
+  sync-config.sh         # sync ~/.mustangclaw to container (/home/node/.openclaw) or remote
   upgrade.sh             # git pull + rebuild (local or remote)
   ssh-do.sh              # SSH into droplet with optional port forwarding
   cloud-init.yml         # cloud-init user data for droplet bootstrap
@@ -98,6 +98,7 @@ The Docker entrypoint (`scripts/docker-entrypoint.sh`) includes `http://localhos
 - Browser devices connecting to the dashboard must be **paired** (approved). `mustangclaw dashboard` handles this automatically. Device pairings are stored in `~/.mustangclaw/devices/` and go stale on gateway restarts
 - The dashboard URL uses a **hash fragment** (`/#token=...`), not a query parameter
 - **Poseidon** (agent dashboard) is bundled into the image via `Dockerfile.poseidon` — a multi-stage overlay that builds the Vite frontend and copies the Bun API + static files into `/poseidon`. The entrypoint starts Poseidon in the background on `POSEIDON_PORT` (default 18791) before launching the gateway. When Poseidon is not bundled, the entrypoint skips it gracefully
+- **Path mapping**: Host `~/.mustangclaw` is mounted into the container as `/home/node/.openclaw` (via docker-compose volumes). All container-internal references use `.openclaw`; the `.mustangclaw` name is only used on the host side. `mustangclaw sync` copies to `/home/node/.openclaw/` inside the container
 
 ## Build Options
 

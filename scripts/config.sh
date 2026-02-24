@@ -152,6 +152,12 @@ if gw.get('bind') != 'lan':
 if 'tailscale' in gw:
     del gw['tailscale']
     changed = True
+# non-loopback bind requires controlUi.allowedOrigins or host-header fallback
+cui = gw.get('controlUi', {})
+if not cui.get('dangerouslyAllowHostHeaderOriginFallback'):
+    cui['dangerouslyAllowHostHeaderOriginFallback'] = True
+    gw['controlUi'] = cui
+    changed = True
 if changed:
     cfg['gateway'] = gw
     with open(sys.argv[1], 'w') as f:

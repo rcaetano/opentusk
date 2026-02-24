@@ -125,7 +125,7 @@ log_info "Wrote gateway token to openclaw.json."
 # Preserve any existing extra env vars the user may have added.
 if [[ -f "$ENV_FILE" ]]; then
     # Remove lines we manage, keep everything else
-    EXISTING=$(grep -vE '^(OPENCLAW_IMAGE|OPENCLAW_GATEWAY_TOKEN|OPENCLAW_CONFIG_DIR|OPENCLAW_WORKSPACE_DIR|OPENCLAW_GATEWAY_BIND)=' "$ENV_FILE" || true)
+    EXISTING=$(grep -vE '^(OPENCLAW_IMAGE|OPENCLAW_GATEWAY_TOKEN|OPENCLAW_CONFIG_DIR|OPENCLAW_WORKSPACE_DIR|OPENCLAW_GATEWAY_BIND|POSEIDON_PORT)=' "$ENV_FILE" || true)
 else
     EXISTING=""
 fi

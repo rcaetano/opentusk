@@ -1,0 +1,391 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1600"
+     font-family="'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="aHTTP" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#3b82f6"/>
+    </marker>
+    <marker id="aWS" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#22c55e"/>
+    </marker>
+    <marker id="aRPC" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#c084fc"/>
+    </marker>
+    <marker id="aSSH" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#f59e0b"/>
+    </marker>
+    <marker id="aVol" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#f472b6"/>
+    </marker>
+    <marker id="aTS" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+      <path d="M0,0 L7,2.5 L0,5" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <!-- BG: OpenClaw bg #12141a -->
+  <rect width="1800" height="1600" fill="#12141a"/>
+
+  <!-- Subtle dot grid -->
+  <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+    <circle cx="16" cy="16" r="0.6" fill="#ffffff" opacity="0.06"/>
+  </pattern>
+  <rect width="1800" height="1600" fill="url(#dots)"/>
+
+  <!-- Title -->
+  <text x="900" y="56" text-anchor="middle" fill="#fafafa" font-size="26" font-weight="700" letter-spacing="0.5">MustangClaw System Architecture</text>
+  <text x="900" y="80" text-anchor="middle" fill="#71717a" font-size="13" letter-spacing="0.3">Component layout, data flows, and communication patterns</text>
+
+  <!-- ================================================================ -->
+  <!-- LAYER 1: CLIENTS  y=110..330 -->
+  <!-- ================================================================ -->
+  <rect x="60" y="110" width="1680" height="240" rx="12" fill="none" stroke="#27272a" stroke-width="1"/>
+  <text x="84" y="138" fill="#ff5c5c" font-size="11" font-weight="600" letter-spacing="2.5">CLIENTS</text>
+
+  <!-- Poseidon UI -->
+  <rect x="100" y="160" width="280" height="168" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="240" y="188" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Poseidon UI</text>
+  <text x="240" y="210" text-anchor="middle" fill="#71717a" font-size="12">React + Vite</text>
+  <text x="240" y="236" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Zustand store</text>
+  <text x="240" y="256" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Physics engine</text>
+  <text x="240" y="276" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">WebSocket client</text>
+  <text x="240" y="306" text-anchor="middle" fill="#3f3f46" font-size="10"
+        font-family="'JetBrains Mono', monospace">localhost:18791</text>
+
+  <!-- OpenClaw Control -->
+  <rect x="430" y="160" width="280" height="168" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="570" y="188" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">OpenClaw Control</text>
+  <text x="570" y="210" text-anchor="middle" fill="#71717a" font-size="12">Dashboard</text>
+  <text x="570" y="236" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Device pairing</text>
+  <text x="570" y="256" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">/#token=...</text>
+  <text x="570" y="276" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">localStorage</text>
+  <text x="570" y="306" text-anchor="middle" fill="#3f3f46" font-size="10"
+        font-family="'JetBrains Mono', monospace">localhost:18789</text>
+
+  <!-- TUI Client -->
+  <rect x="760" y="160" width="280" height="168" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="900" y="188" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">TUI Client</text>
+  <text x="900" y="210" text-anchor="middle" fill="#71717a" font-size="12">Terminal UI</text>
+  <text x="900" y="236" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">--network container:</text>
+  <text x="900" y="256" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">127.0.0.1 loopback</text>
+  <text x="900" y="276" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">device tokens</text>
+
+  <!-- Remote Browser -->
+  <rect x="1090" y="160" width="280" height="168" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1230" y="188" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Remote Browser</text>
+  <text x="1230" y="210" text-anchor="middle" fill="#71717a" font-size="12">via Tailscale HTTPS</text>
+  <text x="1230" y="240" text-anchor="middle" fill="#38bdf8" font-size="11"
+        font-family="'JetBrains Mono', monospace">:443  Poseidon</text>
+  <text x="1230" y="260" text-anchor="middle" fill="#38bdf8" font-size="11"
+        font-family="'JetBrains Mono', monospace">:8443 Gateway</text>
+
+  <!-- Legend (top-right) -->
+  <rect x="1430" y="160" width="290" height="168" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1575" y="186" text-anchor="middle" fill="#e4e4e7" font-size="12" font-weight="600" letter-spacing="1">LEGEND</text>
+  <line x1="1450" y1="202" x2="1494" y2="202" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#aHTTP)"/>
+  <text x="1506" y="206" fill="#71717a" font-size="11">HTTP</text>
+  <line x1="1450" y1="224" x2="1494" y2="224" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#aWS)"/>
+  <text x="1506" y="228" fill="#71717a" font-size="11">WebSocket</text>
+  <line x1="1450" y1="246" x2="1494" y2="246" stroke="#c084fc" stroke-width="1.5" marker-end="url(#aRPC)"/>
+  <text x="1506" y="250" fill="#71717a" font-size="11">Internal RPC</text>
+  <line x1="1450" y1="268" x2="1494" y2="268" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="8,4" marker-end="url(#aSSH)"/>
+  <text x="1506" y="272" fill="#71717a" font-size="11">SSH / rsync</text>
+  <line x1="1450" y1="290" x2="1494" y2="290" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#aVol)"/>
+  <text x="1506" y="294" fill="#71717a" font-size="11">Volume mount</text>
+  <line x1="1450" y1="312" x2="1494" y2="312" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#aTS)"/>
+  <text x="1506" y="316" fill="#71717a" font-size="11">Tailscale HTTPS</text>
+
+  <!-- ================================================================ -->
+  <!-- LAYER 2: HOST MACHINE  y=400..700 -->
+  <!-- ================================================================ -->
+  <rect x="60" y="400" width="1680" height="310" rx="12" fill="none" stroke="#27272a" stroke-width="1"/>
+  <text x="84" y="428" fill="#14b8a6" font-size="11" font-weight="600" letter-spacing="2.5">HOST MACHINE</text>
+
+  <!-- CLI Dispatcher -->
+  <rect x="100" y="452" width="300" height="230" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="250" y="480" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">CLI Dispatcher</text>
+  <text x="250" y="502" text-anchor="middle" fill="#14b8a6" font-size="12"
+        font-family="'JetBrains Mono', monospace">./mustangclaw</text>
+  <text x="250" y="532" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">init  | build | run</text>
+  <text x="250" y="554" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">setup | dashboard</text>
+  <text x="250" y="576" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">deploy | sync | ssh</text>
+  <text x="250" y="598" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">tui  | exec | logs</text>
+  <text x="250" y="620" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">save | load | status</text>
+  <text x="250" y="658" text-anchor="middle" fill="#3f3f46" font-size="10">dispatches to scripts/*.sh</text>
+
+  <!-- Config Files -->
+  <rect x="450" y="452" width="300" height="230" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="600" y="480" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Config Files</text>
+  <text x="600" y="502" text-anchor="middle" fill="#14b8a6" font-size="12"
+        font-family="'JetBrains Mono', monospace">~/.mustangclaw/</text>
+  <text x="600" y="532" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">config.env</text>
+  <text x="600" y="554" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">openclaw.json</text>
+  <text x="600" y="576" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">devices/</text>
+  <text x="600" y="598" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">agents/</text>
+  <text x="600" y="658" text-anchor="middle" fill="#3f3f46" font-size="10">mounted into container</text>
+
+  <!-- Vite Dev Server -->
+  <rect x="800" y="452" width="300" height="230" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="950" y="480" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Vite Dev Server</text>
+  <text x="950" y="502" text-anchor="middle" fill="#71717a" font-size="12">optional, dev mode</text>
+  <text x="950" y="532" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">pnpm dev:web</text>
+  <text x="950" y="554" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">localhost:5173</text>
+  <text x="950" y="576" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">proxies /api  /ws</text>
+  <text x="950" y="658" text-anchor="middle" fill="#3f3f46" font-size="10">CORS_ORIGINS includes :5173</text>
+
+  <!-- Docker Build -->
+  <rect x="1150" y="452" width="280" height="230" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1290" y="480" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Docker Build</text>
+  <text x="1290" y="502" text-anchor="middle" fill="#14b8a6" font-size="12"
+        font-family="'JetBrains Mono', monospace">mustangclaw:local</text>
+  <text x="1290" y="532" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Dockerfile</text>
+  <text x="1290" y="554" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Dockerfile.poseidon</text>
+  <text x="1290" y="576" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">--browser  --apt</text>
+  <text x="1290" y="598" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">save / load (.tar.gz)</text>
+
+  <!-- Scripts -->
+  <rect x="1480" y="452" width="240" height="230" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1600" y="480" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Scripts</text>
+  <text x="1600" y="502" text-anchor="middle" fill="#14b8a6" font-size="12"
+        font-family="'JetBrains Mono', monospace">scripts/</text>
+  <text x="1600" y="532" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">config.sh</text>
+  <text x="1600" y="554" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">run-local.sh</text>
+  <text x="1600" y="576" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">deploy-do.sh</text>
+  <text x="1600" y="598" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">sync-config.sh</text>
+  <text x="1600" y="620" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">docker-entrypoint.sh</text>
+
+  <!-- ================================================================ -->
+  <!-- LAYER 3: DOCKER CONTAINER  y=760..1120 -->
+  <!-- ================================================================ -->
+  <rect x="60" y="760" width="1340" height="370" rx="12" fill="none" stroke="#27272a" stroke-width="1"/>
+  <text x="84" y="788" fill="#c084fc" font-size="11" font-weight="600" letter-spacing="2.5">DOCKER CONTAINER</text>
+  <text x="370" y="788" fill="#3f3f46" font-size="11"
+        font-family="'JetBrains Mono', monospace">mustangclaw  (docker-compose)</text>
+
+  <!-- Entrypoint -->
+  <rect x="100" y="810" width="260" height="140" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="230" y="840" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Entrypoint</text>
+  <text x="230" y="866" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">docker-entrypoint.sh</text>
+  <text x="230" y="892" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">patches openclaw.json</text>
+  <text x="230" y="914" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">starts Poseidon bg</text>
+
+  <!-- Gateway -->
+  <rect x="420" y="810" width="280" height="140" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="560" y="840" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">OpenClaw Gateway</text>
+  <text x="560" y="864" text-anchor="middle" fill="#ff5c5c" font-size="13"
+        font-family="'JetBrains Mono', monospace">:18789</text>
+  <text x="560" y="892" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">bind=lan</text>
+  <text x="560" y="914" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">GATEWAY_TOKEN auth</text>
+
+  <!-- Poseidon API -->
+  <rect x="760" y="810" width="280" height="140" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="900" y="840" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Poseidon API</text>
+  <text x="900" y="864" text-anchor="middle" fill="#ff5c5c" font-size="13"
+        font-family="'JetBrains Mono', monospace">:18791</text>
+  <text x="900" y="892" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Bun server</text>
+  <text x="900" y="914" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">+ Vite static files</text>
+
+  <!-- Volumes -->
+  <rect x="1100" y="810" width="260" height="140" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1230" y="840" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Volumes</text>
+  <text x="1230" y="868" text-anchor="middle" fill="#f472b6" font-size="11"
+        font-family="'JetBrains Mono', monospace">/home/node/.openclaw/</text>
+  <text x="1230" y="896" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">OPENCLAW_EXTRA_MOUNTS</text>
+  <text x="1230" y="920" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">OPENCLAW_HOME_VOLUME</text>
+
+  <!-- Sandbox -->
+  <rect x="100" y="980" width="420" height="120" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="310" y="1010" text-anchor="middle" fill="#fafafa" font-size="14" font-weight="600">Agent Sandbox Containers</text>
+  <text x="310" y="1036" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">openclaw-sandbox:bookworm-slim</text>
+  <text x="310" y="1058" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">network=none  ro root  1GB mem</text>
+  <text x="310" y="1080" text-anchor="middle" fill="#3f3f46" font-size="10">spawned per-agent for tool isolation</text>
+
+  <!-- Bridge -->
+  <rect x="580" y="980" width="220" height="120" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="690" y="1010" text-anchor="middle" fill="#fafafa" font-size="14" font-weight="600">Bridge</text>
+  <text x="690" y="1036" text-anchor="middle" fill="#ff5c5c" font-size="13"
+        font-family="'JetBrains Mono', monospace">:18790</text>
+  <text x="690" y="1062" text-anchor="middle" fill="#52525b" font-size="11">internal communication</text>
+
+  <!-- .env Bridge -->
+  <rect x="860" y="980" width="260" height="120" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="990" y="1010" text-anchor="middle" fill="#fafafa" font-size="14" font-weight="600">.env Bridge</text>
+  <text x="990" y="1040" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">MUSTANGCLAW_*</text>
+  <text x="990" y="1064" text-anchor="middle" fill="#3f3f46" font-size="11"
+        font-family="'JetBrains Mono', monospace">  &#x2192; OPENCLAW_*</text>
+
+  <!-- ================================================================ -->
+  <!-- LAYER 4: CLOUD / REMOTE  y=1180..1460 -->
+  <!-- ================================================================ -->
+  <rect x="60" y="1180" width="1680" height="290" rx="12" fill="none" stroke="#27272a" stroke-width="1"/>
+  <text x="84" y="1208" fill="#f59e0b" font-size="11" font-weight="600" letter-spacing="2.5">CLOUD / REMOTE</text>
+
+  <!-- DigitalOcean -->
+  <rect x="100" y="1230" width="340" height="210" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="270" y="1260" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">DigitalOcean Droplet</text>
+  <text x="270" y="1286" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">s-4vcpu-8gb</text>
+  <text x="270" y="1312" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Docker on Ubuntu 22.04</text>
+  <text x="270" y="1338" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">cloud-init.yml bootstrap</text>
+  <text x="270" y="1364" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">2GB swap (OOM prevention)</text>
+
+  <!-- Tailscale -->
+  <rect x="500" y="1230" width="340" height="210" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="670" y="1260" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Tailscale</text>
+  <text x="670" y="1282" text-anchor="middle" fill="#71717a" font-size="12">Mesh VPN Overlay</text>
+  <text x="670" y="1314" text-anchor="middle" fill="#38bdf8" font-size="11"
+        font-family="'JetBrains Mono', monospace">--https=443  &#x2192; :18791</text>
+  <text x="670" y="1338" text-anchor="middle" fill="#38bdf8" font-size="11"
+        font-family="'JetBrains Mono', monospace">--https=8443 &#x2192; :18789</text>
+  <text x="670" y="1366" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">mode: serve | funnel</text>
+
+  <!-- External APIs -->
+  <rect x="900" y="1230" width="340" height="210" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1070" y="1260" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">External Services</text>
+  <text x="1070" y="1282" text-anchor="middle" fill="#71717a" font-size="12">LLM API Providers</text>
+  <text x="1070" y="1314" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">Anthropic / OpenAI / etc</text>
+  <text x="1070" y="1340" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">configured in openclaw.json</text>
+  <text x="1070" y="1366" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">via mustangclaw setup</text>
+
+  <!-- Deploy Pipeline -->
+  <rect x="1300" y="1230" width="340" height="210" rx="8" fill="#181b22" stroke="#27272a"/>
+  <text x="1470" y="1260" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Deploy Pipeline</text>
+  <text x="1470" y="1282" text-anchor="middle" fill="#71717a" font-size="12"
+        font-family="'JetBrains Mono', monospace">doctl CLI</text>
+  <text x="1470" y="1314" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">deploy-do.sh  &#x2192; provision</text>
+  <text x="1470" y="1340" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">sync-config.sh &#x2192; rsync</text>
+  <text x="1470" y="1366" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">upgrade.sh &#x2192; rebuild</text>
+
+  <!-- ================================================================ -->
+  <!-- DATA FLOW ARROWS -->
+  <!-- ================================================================ -->
+
+  <!-- HTTP: Poseidon UI → Poseidon API (through host layer) -->
+  <path d="M200,328 L200,370 L900,370 L900,810"
+        fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="6,3"
+        marker-end="url(#aHTTP)" opacity="0.7"/>
+  <rect x="830" y="728" width="80" height="20" rx="4" fill="#12141a"/>
+  <text x="870" y="742" text-anchor="middle" fill="#3b82f6" font-size="10" font-weight="600">HTTP /api</text>
+
+  <!-- WS: Poseidon UI → Poseidon API -->
+  <path d="M280,328 L280,380 L940,380 L940,810"
+        fill="none" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,3"
+        marker-end="url(#aWS)" opacity="0.7"/>
+  <rect x="944" y="728" width="64" height="20" rx="4" fill="#12141a"/>
+  <text x="976" y="742" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="600">WS /ws</text>
+
+  <!-- HTTP: OpenClaw Control → Gateway -->
+  <path d="M570,328 L570,360 L560,360 L560,810"
+        fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="6,3"
+        marker-end="url(#aHTTP)" opacity="0.7"/>
+  <rect x="498" y="728" width="50" height="20" rx="4" fill="#12141a"/>
+  <text x="523" y="742" text-anchor="middle" fill="#3b82f6" font-size="10" font-weight="600">HTTP</text>
+
+  <!-- RPC: Poseidon API → Gateway (internal) -->
+  <path d="M760,880 L700,880"
+        fill="none" stroke="#c084fc" stroke-width="1.5"
+        marker-end="url(#aRPC)" opacity="0.8"/>
+  <rect x="700" y="858" width="60" height="18" rx="4" fill="#12141a"/>
+  <text x="730" y="871" text-anchor="middle" fill="#c084fc" font-size="10" font-weight="600">RPC/WS</text>
+
+  <!-- Volume mount: Config → Docker volumes -->
+  <path d="M600,682 L600,730 L1230,730 L1230,810"
+        fill="none" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="3,3"
+        marker-end="url(#aVol)" opacity="0.6"/>
+  <rect x="810" y="718" width="260" height="20" rx="4" fill="#12141a"/>
+  <text x="940" y="732" text-anchor="middle" fill="#f472b6" font-size="10" font-weight="600">Volume: ~/.mustangclaw &#x2192; .openclaw</text>
+
+  <!-- Vite proxy → Poseidon API -->
+  <path d="M950,682 L950,730 L920,730 L920,810"
+        fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4,3"
+        marker-end="url(#aHTTP)" opacity="0.5"/>
+  <rect x="874" y="692" width="48" height="18" rx="4" fill="#12141a"/>
+  <text x="898" y="705" text-anchor="middle" fill="#3b82f6" font-size="9" font-weight="600">proxy</text>
+
+  <!-- SSH: Host CLI → Droplet -->
+  <path d="M250,682 L250,1230"
+        fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="8,4"
+        marker-end="url(#aSSH)" opacity="0.6"/>
+  <rect x="184" y="1152" width="90" height="20" rx="4" fill="#12141a"/>
+  <text x="229" y="1166" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="600">SSH / rsync</text>
+
+  <!-- Tailscale: Remote Browser → Tailscale -->
+  <path d="M1230,328 L1230,390 L1500,390 L1500,1160 L670,1160 L670,1230"
+        fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="5,3"
+        marker-end="url(#aTS)" opacity="0.6"/>
+  <rect x="1424" y="750" width="120" height="20" rx="4" fill="#12141a"/>
+  <text x="1484" y="764" text-anchor="middle" fill="#38bdf8" font-size="10" font-weight="600">Tailscale HTTPS</text>
+
+  <!-- Gateway → External APIs -->
+  <path d="M560,950 L560,1160 L1070,1160 L1070,1230"
+        fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,4"
+        marker-end="url(#aSSH)" opacity="0.5"/>
+  <rect x="724" y="1148" width="110" height="20" rx="4" fill="#12141a"/>
+  <text x="779" y="1162" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="600">API calls (HTTPS)</text>
+
+  <!-- CLI → Scripts (small connector) -->
+  <path d="M400,560 L450,560"
+        fill="none" stroke="#14b8a6" stroke-width="1" opacity="0.3"/>
+
+  <!-- ================================================================ -->
+  <!-- PORT MAP (bottom) -->
+  <!-- ================================================================ -->
+  <rect x="60" y="1510" width="1680" height="60" rx="8" fill="none" stroke="#27272a" stroke-width="1"/>
+  <text x="84" y="1537" fill="#3f3f46" font-size="10" font-weight="600" letter-spacing="2">PORT MAP</text>
+  <text x="84" y="1556" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">18789 Gateway    18790 Bridge    18791 Poseidon    5173 Vite Dev</text>
+  <text x="820" y="1556" fill="#38bdf8" font-size="11"
+        font-family="'JetBrains Mono', monospace">443 Tailscale &#x2192; Poseidon    8443 Tailscale &#x2192; Gateway</text>
+  <text x="1380" y="1556" fill="#3f3f46" font-size="10"
+        font-family="'JetBrains Mono', monospace">config.env  |  openclaw/.env</text>
+</svg>

@@ -32,6 +32,7 @@ Commands:
   exec      Run an OpenClaw CLI command in the gateway       e.g. exec health
   docker    Open a shell inside the gateway container
   rotate-tokens  Rotate all device tokens with full scope set (2026.2.19 fix)
+  audit     Full sanity check of the setup                 [--remote] [--fix]
   status    Show local container & remote droplet status  [--health]
 
 Run 'mustangclaw <command> --help' for details on a specific command.
@@ -319,6 +320,7 @@ case "$COMMAND" in
         gw_container=$(require_running_gateway)
         exec docker exec -it "$gw_container" node dist/index.js "$@"
         ;;
+    audit)   exec "$MUSTANGCLAW_ROOT/scripts/audit.sh"         "$@" ;;
     rotate-tokens) exec "$MUSTANGCLAW_ROOT/scripts/rotate-tokens.sh" "$@" ;;
     status)  cmd_status "$@" ;;
     help|--help|-h) usage ;;
