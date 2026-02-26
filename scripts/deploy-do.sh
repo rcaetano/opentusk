@@ -354,6 +354,14 @@ BUNKEY
         read -r
     fi
 
+    # Verify SSH before the build session (bun install may cause sshd churn)
+    log_info "Verifying SSH connectivity..."
+    if ! wait_for_ssh "$DROPLET_IP" 60 "SSH (pre-build)"; then
+        log_error "SSH not available before Poseidon build. Try again: ./opentusk deploy"
+        exit 1
+    fi
+    echo ""
+
     # Clone/pull + build + systemd (single session)
     log_info "Cloning, building, and configuring Poseidon service..."
     remote_exec "$DROPLET_IP" bash -s \
