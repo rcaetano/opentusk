@@ -12,7 +12,7 @@ Usage: opentusk <command> [options]
 
 Commands:
   init      Configure OpenTusk (interactive wizard)      [--reset]
-  deploy    Create & provision DO droplet                   [--dry-run] [--force]
+  deploy    Create & provision DO droplet         [--ip IP] [--dry-run] [--force]
   destroy   Tear down DO droplet                            [--force]
   upgrade   Upgrade remote droplet                          [--ip IP] [--rollback]
   ssh       SSH into droplet                                [--tunnel] [--ip IP]

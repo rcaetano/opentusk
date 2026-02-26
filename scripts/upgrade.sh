@@ -50,7 +50,7 @@ log_info "Upgrading remote at $IP..."
 # 1. Update OpenClaw via marketplace updater (or rollback)
 if [[ "$ROLLBACK" == "true" ]]; then
     log_info "Rolling back OpenClaw on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+    remote_exec "$IP" <<'OCUPDATE'
 set -euo pipefail
 if [[ -x /opt/rollback-openclaw.sh ]]; then
     /opt/rollback-openclaw.sh
@@ -61,7 +61,7 @@ systemctl restart openclaw
 OCUPDATE
 else
     log_info "Updating OpenClaw on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+    remote_exec "$IP" <<'OCUPDATE'
 set -euo pipefail
 if [[ -x /opt/update-openclaw.sh ]]; then
     /opt/update-openclaw.sh
@@ -74,37 +74,32 @@ fi
 
 # 2. Pull latest Poseidon source via git on the remote
 if [[ -n "${POSEIDON_REPO:-}" ]]; then
-    log_info "Pulling latest Poseidon on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<POSPULL
+    log_info "Pulling and rebuilding Poseidon on remote..."
+    remote_exec "$IP" bash -s "$REMOTE_POSEIDON_DIR" "$POSEIDON_BRANCH" <<'POSBUILD'
 set -euo pipefail
-cd ${REMOTE_POSEIDON_DIR}
+POS_DIR="$1"; POS_BRANCH="$2"
+cd "$POS_DIR"
 git fetch origin
-git reset --hard origin/${POSEIDON_BRANCH}
-POSPULL
-
-    # 3. Rebuild Poseidon + restart
-    log_info "Rebuilding Poseidon on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<POSBUILD
-set -euo pipefail
-cd ${REMOTE_POSEIDON_DIR}
+git reset --hard "origin/$POS_BRANCH"
 pnpm install --frozen-lockfile
 pnpm --filter @poseidon/web build
-chown -R openclaw:openclaw ${REMOTE_POSEIDON_DIR}
+chown -R openclaw:openclaw "$POS_DIR"
 systemctl restart poseidon
 POSBUILD
 else
     log_warn "POSEIDON_REPO not set — skipping Poseidon upgrade."
 fi
 
-# 4. Verify Tailscale serve (re-apply if missing)
+# 3. Verify Tailscale serve (re-apply if missing)
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     log_info "Verifying Tailscale serve configuration..."
-    SERVE_OK=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<TSCHECK
+    SERVE_OK=$(remote_exec "$IP" bash -s "$POSEIDON_PORT" "$GATEWAY_PORT" <<'TSCHECK'
+POS_PORT="$1"; GW_PORT="$2"
 if ! command -v tailscale &>/dev/null; then
     echo "not_installed"
-elif ! tailscale serve status 2>&1 | grep -q "localhost:${POSEIDON_PORT}"; then
+elif ! tailscale serve status 2>&1 | grep -q "localhost:${POS_PORT}"; then
     echo "missing_poseidon"
-elif ! tailscale serve status 2>&1 | grep -q "localhost:${GATEWAY_PORT}"; then
+elif ! tailscale serve status 2>&1 | grep -q "localhost:${GW_PORT}"; then
     echo "missing_gateway"
 else
     echo "ok"
@@ -116,17 +111,17 @@ TSCHECK
         log_warn "Install with: ssh ${DO_SSH_USER}@${IP} 'curl -fsSL https://tailscale.com/install.sh | sh && tailscale up'"
     elif [[ "$SERVE_OK" != "ok" ]]; then
         log_warn "Tailscale serve incomplete ($SERVE_OK) — re-applying..."
-        if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
-            ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<TSFUNNEL
-tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
-tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
-TSFUNNEL
-        else
-            ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<TSSERVE
-tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
-tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
-TSSERVE
-        fi
+        remote_exec "$IP" bash -s "$TAILSCALE_MODE" "$POSEIDON_PORT" "$GATEWAY_PORT" <<'TSFIX'
+set -euo pipefail
+TS_MODE="$1"; POS_PORT="$2"; GW_PORT="$3"
+if [[ "$TS_MODE" == "funnel" ]]; then
+    tailscale funnel --bg --https=8443 "http://localhost:${GW_PORT}"
+    tailscale serve --bg --https=443 "http://localhost:${POS_PORT}"
+else
+    tailscale serve --bg --https=8443 "http://localhost:${GW_PORT}"
+    tailscale serve --bg --https=443 "http://localhost:${POS_PORT}"
+fi
+TSFIX
         log_info "Tailscale serve re-applied."
     else
         log_info "Tailscale serve OK."

@@ -98,3 +98,49 @@ confirm() {
         *) return 1 ;;
     esac
 }
+
+# ─── SSH Helpers ────────────────────────────────────────────────────────────
+
+# Build base SSH options: includes key file when DO_SSH_KEY_FILE is set.
+SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new)
+if [[ -n "${DO_SSH_KEY_FILE:-}" && -f "$DO_SSH_KEY_FILE" ]]; then
+    SSH_BASE_OPTS+=(-i "$DO_SSH_KEY_FILE" -o IdentitiesOnly=yes)
+fi
+
+# remote_exec <ip> [command...]
+#   With args:   runs command on remote via ssh
+#   Without args: pipes stdin to bash on remote (heredoc mode)
+#
+# To pass variables into a quoted heredoc, use:
+#   remote_exec "$IP" bash -s "$var1" "$var2" <<'EOF'
+#     echo "$1" "$2"
+#   EOF
+remote_exec() {
+    local ip="$1"; shift
+    if [[ $# -gt 0 ]]; then
+        ssh "${SSH_BASE_OPTS[@]}" "${DO_SSH_USER}@${ip}" "$@"
+    else
+        ssh "${SSH_BASE_OPTS[@]}" "${DO_SSH_USER}@${ip}" bash
+    fi
+}
+
+# wait_for_ssh <ip> [timeout] [label]
+#   Polls SSH connectivity. Returns 0 on success, 1 on timeout.
+wait_for_ssh() {
+    local ip="$1"
+    local timeout="${2:-180}"
+    local label="${3:-SSH}"
+    local elapsed=0
+    while true; do
+        if ssh "${SSH_BASE_OPTS[@]}" -o ConnectTimeout=5 "${DO_SSH_USER}@${ip}" true 2>/dev/null; then
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+        if [[ $elapsed -ge $timeout ]]; then
+            log_error "$label not ready after ${timeout}s."
+            return 1
+        fi
+        printf "."
+    done
+}

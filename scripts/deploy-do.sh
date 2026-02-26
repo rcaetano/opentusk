@@ -15,13 +15,15 @@ using the OpenClaw marketplace image.
 This script is idempotent — if the droplet already exists, it will skip creation.
 
 Options:
+  --ip IP     Target an existing OpenClaw droplet by IP (skips DO creation)
   --dry-run   Show what would happen without creating anything
   --force     Skip confirmation prompts
   --help      Show this help message
 
 Examples:
-  $(basename "$0")            # create and provision droplet
-  $(basename "$0") --dry-run  # preview without changes
+  $(basename "$0")                  # create and provision droplet
+  $(basename "$0") --dry-run        # preview without changes
+  $(basename "$0") --ip 1.2.3.4    # provision existing droplet
 EOF
     exit 0
 }
@@ -29,12 +31,14 @@ EOF
 # ─── Parse flags ─────────────────────────────────────────────────────────────
 DRY_RUN=false
 FORCE=false
-for arg in "$@"; do
-    case "$arg" in
-        --dry-run) DRY_RUN=true ;;
-        --force)   FORCE=true ;;
+TARGET_IP=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        --force)   FORCE=true; shift ;;
+        --ip)      TARGET_IP="$2"; shift 2 ;;
         --help|-h) usage ;;
-        *) log_error "Unknown option: $arg"; usage ;;
+        *) log_error "Unknown option: $1"; usage ;;
     esac
 done
 export FORCE
@@ -44,49 +48,59 @@ export FORCE
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Validating prerequisites..."
 
-require_cmd doctl
 require_cmd ssh
 
-if [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
-    log_error "DIGITALOCEAN_ACCESS_TOKEN is not set."
-    log_error "Export it: export DIGITALOCEAN_ACCESS_TOKEN='dop_v1_...'"
-    exit 1
-fi
+if [[ -z "$TARGET_IP" ]]; then
+    require_cmd doctl
 
-# Resolve SSH key fingerprint
-if [[ -z "$DO_SSH_KEY_FINGERPRINT" ]]; then
-    log_info "Auto-detecting SSH key from DigitalOcean..."
-    DO_SSH_KEY_FINGERPRINT=$(doctl compute ssh-key list --format FingerPrint --no-header | head -1)
-    if [[ -z "$DO_SSH_KEY_FINGERPRINT" ]]; then
-        log_error "No SSH keys found in your DigitalOcean account."
-        log_error "Add one: doctl compute ssh-key create my-key --public-key-file ~/.ssh/id_ed25519.pub"
+    if [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
+        log_error "DIGITALOCEAN_ACCESS_TOKEN is not set."
+        log_error "Export it: export DIGITALOCEAN_ACCESS_TOKEN='dop_v1_...'"
         exit 1
     fi
-    log_info "Using SSH key: $DO_SSH_KEY_FINGERPRINT"
+
+    # Resolve SSH key fingerprint
+    if [[ -z "$DO_SSH_KEY_FINGERPRINT" ]]; then
+        log_info "Auto-detecting SSH key from DigitalOcean..."
+        DO_SSH_KEY_FINGERPRINT=$(doctl compute ssh-key list --format FingerPrint --no-header | head -1)
+        if [[ -z "$DO_SSH_KEY_FINGERPRINT" ]]; then
+            log_error "No SSH keys found in your DigitalOcean account."
+            log_error "Add one: doctl compute ssh-key create my-key --public-key-file ~/.ssh/id_ed25519.pub"
+            exit 1
+        fi
+        log_info "Using SSH key: $DO_SSH_KEY_FINGERPRINT"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 2: Check if droplet already exists
+# Phase 2: Resolve droplet IP
 # ═══════════════════════════════════════════════════════════════════════════════
-EXISTING_IP=$(doctl compute droplet list --tag-name "$DO_TAG" \
-    --format Name,PublicIPv4 --no-header \
-    | awk -v n="$DO_DROPLET_NAME" '$1 == n { print $2 }' || true)
+SKIP_CLOUD_INIT=true
 
-DROPLET_EXISTED=false
-if [[ -n "$EXISTING_IP" ]]; then
-    DROPLET_EXISTED=true
-    DROPLET_IP="$EXISTING_IP"
-    log_warn "Droplet '$DO_DROPLET_NAME' already exists at $DROPLET_IP — resuming provisioning."
+if [[ -n "$TARGET_IP" ]]; then
+    DROPLET_IP="$TARGET_IP"
+    log_info "Using provided IP: $DROPLET_IP"
+else
+    EXISTING_IP=$(doctl compute droplet list --tag-name "$DO_TAG" \
+        --format Name,PublicIPv4 --no-header \
+        | awk -v n="$DO_DROPLET_NAME" '$1 == n { print $2 }' || true)
+
+    if [[ -n "$EXISTING_IP" ]]; then
+        DROPLET_IP="$EXISTING_IP"
+        log_warn "Droplet '$DO_DROPLET_NAME' already exists at $DROPLET_IP — resuming provisioning."
+    else
+        SKIP_CLOUD_INIT=false
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Dry run summary
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ "$DRY_RUN" == "true" ]]; then
-    if [[ "$DROPLET_EXISTED" == "true" ]]; then
+    if [[ -n "${DROPLET_IP:-}" ]]; then
         cat <<EOF
 
-[DRY RUN] Droplet '$DO_DROPLET_NAME' already exists at $DROPLET_IP — would resume provisioning.
+[DRY RUN] Would provision droplet at $DROPLET_IP (existing).
 EOF
     else
         cat <<EOF
@@ -116,9 +130,9 @@ EOF
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 3: Create droplet
+# Phase 2 (cont.): Create droplet if needed
 # ═══════════════════════════════════════════════════════════════════════════════
-if [[ "$DROPLET_EXISTED" != "true" ]]; then
+if [[ -z "${DROPLET_IP:-}" ]]; then
     log_info "Creating droplet '$DO_DROPLET_NAME' (marketplace image: $DO_IMAGE)..."
     doctl compute droplet create "$DO_DROPLET_NAME" \
         --image "$DO_IMAGE" \
@@ -130,104 +144,57 @@ if [[ "$DROPLET_EXISTED" != "true" ]]; then
 
     DROPLET_IP=$(get_droplet_ip)
     log_info "Droplet created at $DROPLET_IP."
-else
-    log_info "Skipping droplet creation (already exists at $DROPLET_IP)."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 4: Wait for SSH
+# Phase 3: Wait for SSH + bootstrap
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Waiting for SSH to become available..."
-MAX_WAIT=180
-ELAPSED=0
-while true; do
-    if ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-            "${DO_SSH_USER}@${DROPLET_IP}" "true" 2>/dev/null; then
-        break
-    fi
-    sleep 5
-    ELAPSED=$((ELAPSED + 5))
-    if [[ $ELAPSED -ge $MAX_WAIT ]]; then
-        log_error "SSH not ready after ${MAX_WAIT}s. Check droplet status."
-        exit 1
-    fi
-    printf "."
-done
+if ! wait_for_ssh "$DROPLET_IP" 180; then
+    log_error "Check droplet status: ssh ${DO_SSH_USER}@${DROPLET_IP}"
+    exit 1
+fi
 echo ""
 log_info "SSH is ready."
 
-# Wait for marketplace first-boot / cloud-init to finish
-# The marketplace image prints "Please wait while we get your droplet ready..."
-# during setup. If we run commands before it completes, the banner
-# text corrupts the protocol stream.
-log_info "Waiting for cloud-init to finish..."
-CLOUD_WAIT=0
-CLOUD_MAX=600
-while true; do
-    CLOUD_STATUS=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" \
-        'cloud-init status 2>/dev/null | grep -oE "done|running|error" || echo "unknown"' 2>/dev/null || echo "unknown")
-    if [[ "$CLOUD_STATUS" == "done" ]]; then
-        break
-    elif [[ "$CLOUD_STATUS" == "error" ]]; then
-        log_warn "cloud-init finished with errors — continuing anyway."
-        break
-    fi
-    sleep 5
-    CLOUD_WAIT=$((CLOUD_WAIT + 5))
-    if [[ $CLOUD_WAIT -ge $CLOUD_MAX ]]; then
-        log_warn "cloud-init still running after ${CLOUD_MAX}s — continuing anyway."
-        break
-    fi
-    printf "."
-done
-echo ""
-log_info "Droplet ready (cloud-init: $CLOUD_STATUS, ${CLOUD_WAIT}s)."
+# Cloud-init polling (only for newly created droplets)
+if [[ "$SKIP_CLOUD_INIT" == "false" ]]; then
+    log_info "Waiting for cloud-init to finish..."
+    CLOUD_WAIT=0
+    CLOUD_MAX=600
+    CLOUD_STATUS="unknown"
+    while true; do
+        CLOUD_STATUS=$(remote_exec "$DROPLET_IP" \
+            'cloud-init status 2>/dev/null | grep -oE "done|running|error" || echo "unknown"' 2>/dev/null || echo "unknown")
+        if [[ "$CLOUD_STATUS" == "done" ]]; then
+            break
+        elif [[ "$CLOUD_STATUS" == "error" ]]; then
+            log_warn "cloud-init finished with errors — continuing anyway."
+            break
+        fi
+        sleep 5
+        CLOUD_WAIT=$((CLOUD_WAIT + 5))
+        if [[ $CLOUD_WAIT -ge $CLOUD_MAX ]]; then
+            log_warn "cloud-init still running after ${CLOUD_MAX}s — continuing anyway."
+            break
+        fi
+        printf "."
+    done
+    echo ""
+    log_info "Droplet ready (cloud-init: $CLOUD_STATUS, ${CLOUD_WAIT}s)."
 
-# Re-verify SSH after cloud-init (cloud-init may restart sshd)
-log_info "Re-verifying SSH connectivity..."
-SSH_RETRY=0
-SSH_RETRY_MAX=60
-while true; do
-    if ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" "true" 2>/dev/null; then
-        break
-    fi
-    sleep 5
-    SSH_RETRY=$((SSH_RETRY + 5))
-    if [[ $SSH_RETRY -ge $SSH_RETRY_MAX ]]; then
-        log_error "SSH connection lost after cloud-init (waited ${SSH_RETRY_MAX}s)."
+    # Re-verify SSH after cloud-init (sshd may restart)
+    log_info "Re-verifying SSH connectivity..."
+    if ! wait_for_ssh "$DROPLET_IP" 60 "SSH (post-cloud-init)"; then
+        log_error "SSH connection lost after cloud-init."
         log_error "The droplet may be rebooting. Try: ssh ${DO_SSH_USER}@${DROPLET_IP}"
         exit 1
     fi
-    printf "."
-done
-echo ""
-
-# ─── Create swap file (prevents OOM on smaller droplets) ─────────────────────
-log_info "Ensuring swap is configured..."
-ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<'SWAPSETUP'
-set -euo pipefail
-if swapon --show | grep -q /swapfile; then
-    echo "Swap already active — skipping."
-else
-    echo "Creating 2GB swap file..."
-    fallocate -l 2G /swapfile
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
-    # Persist across reboots
-    if ! grep -q '/swapfile' /etc/fstab; then
-        echo '/swapfile none swap sw 0 0' >> /etc/fstab
-    fi
-    echo "Swap enabled: $(swapon --show)"
+    echo ""
 fi
-SWAPSETUP
 
-# ─── Check for first-login interactive setup ─────────────────────────────────
-# The marketplace image ships an AI provider selector that runs on first
-# interactive login. If we detect it hasn't been completed, ask the user to
-# finish it before we proceed — otherwise it will eat stdin from our heredoc
-# SSH commands and corrupt the session.
-FIRST_LOGIN_PENDING=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" \
+# First-login wizard check
+FIRST_LOGIN_PENDING=$(remote_exec "$DROPLET_IP" \
     "test -f /etc/update-motd.d/99-one-click && echo yes || echo no" 2>/dev/null || echo "unknown")
 
 if [[ "$FIRST_LOGIN_PENDING" == "yes" ]]; then
@@ -240,37 +207,45 @@ if [[ "$FIRST_LOGIN_PENDING" == "yes" ]]; then
     log_warn "Complete the AI provider setup, then come back here."
     printf "${_CYAN}Press Enter once you've completed the setup...${_NC} "
     read -r
-
-    # Remove the interactive first-login scripts so they don't interfere
-    # with subsequent scripted SSH sessions
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash -c "'
-        rm -rf /etc/update-motd.d/99-one-click
-        # Remove any profile.d or bashrc hooks that run interactive prompts
-        for f in /etc/profile.d/*one-click* /etc/profile.d/*first-login* /etc/profile.d/*setup*; do
-            [ -f \"\$f\" ] && rm -f \"\$f\"
-        done
-        # Strip any first-login selector sourced from root bashrc
-        if [ -f /root/.bashrc ]; then
-            sed -i \"/ai.provider\\|first.login\\|one.click.*setup\\|provider.*selector/Id\" /root/.bashrc
-        fi
-    '" 2>/dev/null || true
-    log_info "Cleaned up first-login scripts."
 fi
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 5: Configure OpenClaw
-# ═══════════════════════════════════════════════════════════════════════════════
-# Check if the remote already has a gateway token (from a previous deploy)
-# Use a wrapper to distinguish "no token file" from "SSH failed"
-EXISTING_TOKEN=""
-if ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -o ConnectTimeout=10 "${DO_SSH_USER}@${DROPLET_IP}" "true" 2>/dev/null; then
-    EXISTING_TOKEN=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" \
-        "python3 -c \"import json; print(json.load(open('${REMOTE_OPENCLAW_HOME}/.openclaw/openclaw.json'))['gateway']['auth']['token'])\" 2>/dev/null" \
-        || true)
+# Swap setup + first-login cleanup (single SSH session)
+remote_exec "$DROPLET_IP" <<'BOOTSTRAP'
+set -euo pipefail
+
+# ── Swap ──
+if swapon --show | grep -q /swapfile; then
+    echo "Swap already active — skipping."
 else
-    log_error "Cannot reach droplet via SSH. Check: ssh ${DO_SSH_USER}@${DROPLET_IP}"
-    exit 1
+    echo "Creating 2GB swap file..."
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    if ! grep -q '/swapfile' /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+    echo "Swap enabled: $(swapon --show)"
 fi
+
+# ── Clean up first-login scripts ──
+rm -rf /etc/update-motd.d/99-one-click
+for f in /etc/profile.d/*one-click* /etc/profile.d/*first-login* /etc/profile.d/*setup*; do
+    [ -f "$f" ] && rm -f "$f"
+done
+if [ -f /root/.bashrc ]; then
+    sed -i "/ai.provider\|first.login\|one.click.*setup\|provider.*selector/Id" /root/.bashrc
+fi
+BOOTSTRAP
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 4: Configure OpenClaw
+# ═══════════════════════════════════════════════════════════════════════════════
+log_info "Checking OpenClaw configuration..."
+
+EXISTING_TOKEN=$(remote_exec "$DROPLET_IP" \
+    "python3 -c \"import json; print(json.load(open('${REMOTE_OPENCLAW_HOME}/.openclaw/openclaw.json'))['gateway']['auth']['token'])\" 2>/dev/null" \
+    || true)
 
 if [[ -n "$EXISTING_TOKEN" ]]; then
     GATEWAY_TOKEN="$EXISTING_TOKEN"
@@ -280,96 +255,62 @@ else
     log_info "Generated new gateway token (${GATEWAY_TOKEN:0:8}...)."
 
     log_info "Configuring OpenClaw on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<CONFIGURE
+    remote_exec "$DROPLET_IP" bash -s \
+        "$REMOTE_OPENCLAW_HOME" "$GATEWAY_TOKEN" "$GATEWAY_PORT" "$POSEIDON_PORT" <<'CONFIGURE'
 set -euo pipefail
+OC_HOME="$1"; TOKEN="$2"; GW_PORT="$3"; POS_PORT="$4"
 
-# Ensure config directory exists with correct permissions
-mkdir -p ${REMOTE_OPENCLAW_HOME}/.openclaw/workspace
-chmod 700 ${REMOTE_OPENCLAW_HOME}/.openclaw
-chmod 700 ${REMOTE_OPENCLAW_HOME}/.openclaw/workspace
+mkdir -p "$OC_HOME/.openclaw/workspace"
+chmod 700 "$OC_HOME/.openclaw"
+chmod 700 "$OC_HOME/.openclaw/workspace"
 
-# Write openclaw.json with gateway token
-cat > ${REMOTE_OPENCLAW_HOME}/.openclaw/openclaw.json <<JSONEOF
+cat > "$OC_HOME/.openclaw/openclaw.json" <<JSONEOF
 {
   "gateway": {
     "mode": "local",
     "auth": {
       "mode": "token",
-      "token": "${GATEWAY_TOKEN}"
+      "token": "$TOKEN"
     }
   }
 }
 JSONEOF
 
-# Write config.env for port settings
-cat > ${REMOTE_OPENCLAW_HOME}/.openclaw/config.env <<CFGEOF
-GATEWAY_PORT=${GATEWAY_PORT}
-POSEIDON_PORT=${POSEIDON_PORT}
+cat > "$OC_HOME/.openclaw/config.env" <<CFGEOF
+GATEWAY_PORT=$GW_PORT
+POSEIDON_PORT=$POS_PORT
 CFGEOF
-chmod 600 ${REMOTE_OPENCLAW_HOME}/.openclaw/config.env
-chmod 600 ${REMOTE_OPENCLAW_HOME}/.openclaw/openclaw.json
+chmod 600 "$OC_HOME/.openclaw/config.env"
+chmod 600 "$OC_HOME/.openclaw/openclaw.json"
 
-# Set ownership
-chown -R openclaw:openclaw ${REMOTE_OPENCLAW_HOME}/.openclaw
-
-# Restart OpenClaw systemd service
+chown -R openclaw:openclaw "$OC_HOME/.openclaw"
 systemctl restart openclaw
 echo "OpenClaw configured and restarted."
 CONFIGURE
 fi
 
-# Persist credentials locally (before later phases can fail)
-CREDS_FILE="$HOME/.openclaw/remote-credentials"
-mkdir -p "$HOME/.openclaw"
-cat > "$CREDS_FILE" <<CREDEOF
-# OpenTusk remote deployment credentials
-# Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-GATEWAY_TOKEN=$GATEWAY_TOKEN
-CREDEOF
-chmod 600 "$CREDS_FILE"
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 6: Deploy Poseidon
+# Phase 5: Deploy Poseidon
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ -n "${POSEIDON_REPO:-}" ]]; then
-    # Verify SSH before the most SSH-heavy phase
-    log_info "Verifying SSH connectivity..."
-    SSH_P6=0
-    while ! ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" "true" 2>/dev/null; do
-        sleep 5
-        SSH_P6=$((SSH_P6 + 5))
-        if [[ $SSH_P6 -ge 60 ]]; then
-            log_error "SSH not available before Poseidon deploy (waited 60s)."
-            log_error "Try again later: ./opentusk deploy"
-            exit 1
-        fi
-        printf "."
-    done
-    [[ $SSH_P6 -gt 0 ]] && echo ""
-
-    log_info "Installing bun on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<'BUNINSTALL'
+    log_info "Installing bun and generating deploy key..."
+    DEPLOY_PUBKEY=$(remote_exec "$DROPLET_IP" <<'BUNKEY'
 set -euo pipefail
+
+# ── Install bun ──
 if ! command -v bun &>/dev/null; then
     curl -fsSL https://bun.sh/install | bash
     ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
 fi
 bun install -g pnpm
 ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
-echo "bun $(bun --version), pnpm $(pnpm --version)"
-BUNINSTALL
+echo "bun $(bun --version), pnpm $(pnpm --version)" >&2
 
-    # Generate deploy key on remote (if not already present)
-    log_info "Setting up deploy key on remote..."
-    DEPLOY_PUBKEY=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<'DEPLOYKEY'
-set -euo pipefail
+# ── Deploy key ──
 KEY_FILE="/root/.ssh/do_proxy_ed25519"
 if [[ ! -f "$KEY_FILE" ]]; then
     ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "opentusk-deploy" >/dev/null 2>&1
 fi
-
-# Configure SSH to use this key for github.com
 if ! grep -q "do_proxy_ed25519" /root/.ssh/config 2>/dev/null; then
     cat >> /root/.ssh/config <<'SSHCONF'
 
@@ -381,12 +322,11 @@ SSHCONF
 fi
 
 cat "${KEY_FILE}.pub"
-DEPLOYKEY
+BUNKEY
     )
 
     # Add deploy key to GitHub repo via gh CLI (or prompt user)
     log_info "Adding deploy key to GitHub repo..."
-    # Extract owner/repo from SSH URL (git@github.com:owner/repo.git)
     REPO_PATH="${POSEIDON_REPO#*:}"
     REPO_PATH="${REPO_PATH%.git}"
 
@@ -414,44 +354,43 @@ DEPLOYKEY
         read -r
     fi
 
-    log_info "Cloning Poseidon on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<GITCLONE
+    # Clone/pull + build + systemd (single session)
+    log_info "Cloning, building, and configuring Poseidon service..."
+    remote_exec "$DROPLET_IP" bash -s \
+        "$REMOTE_POSEIDON_DIR" "$POSEIDON_REPO" "$POSEIDON_BRANCH" \
+        "$POSEIDON_PORT" "$GATEWAY_PORT" "$GATEWAY_TOKEN" <<'POSEIDON'
 set -euo pipefail
-if [[ -d "${REMOTE_POSEIDON_DIR}/.git" ]]; then
-    echo "Poseidon repo already cloned — pulling latest..."
-    cd ${REMOTE_POSEIDON_DIR}
-    git fetch origin
-    git reset --hard origin/${POSEIDON_BRANCH}
-else
-    rm -rf ${REMOTE_POSEIDON_DIR}
-    git clone --branch ${POSEIDON_BRANCH} --depth 1 ${POSEIDON_REPO} ${REMOTE_POSEIDON_DIR}
-fi
-GITCLONE
+POS_DIR="$1"; POS_REPO="$2"; POS_BRANCH="$3"
+POS_PORT="$4"; GW_PORT="$5"; GW_TOKEN="$6"
 
-    log_info "Building Poseidon on remote..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<POSEIDON_BUILD
-set -euo pipefail
-cd ${REMOTE_POSEIDON_DIR}
+# ── Git clone/pull ──
+if [[ -d "$POS_DIR/.git" ]]; then
+    echo "Poseidon repo already cloned — pulling latest..."
+    cd "$POS_DIR"
+    git fetch origin
+    git reset --hard "origin/$POS_BRANCH"
+else
+    rm -rf "$POS_DIR"
+    git clone --branch "$POS_BRANCH" --depth 1 "$POS_REPO" "$POS_DIR"
+fi
+
+# ── Build ──
+cd "$POS_DIR"
 pnpm install --frozen-lockfile
 pnpm --filter @poseidon/web build
-chown -R openclaw:openclaw ${REMOTE_POSEIDON_DIR}
-POSEIDON_BUILD
+chown -R openclaw:openclaw "$POS_DIR"
 
-    log_info "Creating Poseidon systemd service..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<POSEIDON_SERVICE
-set -euo pipefail
-
-# Write environment file
+# ── Environment file ──
 cat > /opt/poseidon.env <<ENVEOF
-PORT=${POSEIDON_PORT}
-GATEWAY_URL=ws://127.0.0.1:${GATEWAY_PORT}
-GATEWAY_TOKEN=${GATEWAY_TOKEN}
-POSEIDON_STATIC_DIR=${REMOTE_POSEIDON_DIR}/apps/web/dist
+PORT=$POS_PORT
+GATEWAY_URL=ws://127.0.0.1:$GW_PORT
+GATEWAY_TOKEN=$GW_TOKEN
+POSEIDON_STATIC_DIR=$POS_DIR/apps/web/dist
 OPENCLAW_SOURCE=opentusk
 ENVEOF
 chmod 600 /opt/poseidon.env
 
-# Write systemd unit
+# ── Systemd unit ──
 cat > /etc/systemd/system/poseidon.service <<'UNITEOF'
 [Unit]
 Description=Poseidon Agent Dashboard
@@ -474,13 +413,13 @@ systemctl daemon-reload
 systemctl enable poseidon
 systemctl restart poseidon
 echo "Poseidon service started."
-POSEIDON_SERVICE
+POSEIDON
 else
     log_warn "POSEIDON_REPO not set — skipping Poseidon deploy."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 7: Tailscale (if enabled)
+# Phase 6: Tailscale (if enabled)
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
@@ -488,114 +427,129 @@ if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         log_warn "After deploy, SSH in and run 'tailscale up' interactively (browser login)."
     fi
     log_info "Installing and configuring Tailscale..."
-    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<TAILSCALE
+    remote_exec "$DROPLET_IP" bash -s \
+        "$TAILSCALE_AUTH_KEY" "$DO_DROPLET_NAME" "$TAILSCALE_MODE" \
+        "$POSEIDON_PORT" "$GATEWAY_PORT" <<'TAILSCALE'
 set -euo pipefail
+TS_KEY="$1"; TS_HOSTNAME="$2"; TS_MODE="$3"
+POS_PORT="$4"; GW_PORT="$5"
 
-# Install Tailscale
+# ── Install ──
 if ! command -v tailscale &>/dev/null; then
     curl -fsSL https://tailscale.com/install.sh | sh
 fi
 
-# Authenticate (skip if already online)
+# ── Authenticate (idempotent) ──
 if tailscale status --self --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if d.get('Self',{}).get('Online') else 1)" 2>/dev/null; then
     echo "Tailscale already online — skipping auth."
 else
-    tailscale up --auth-key="${TAILSCALE_AUTH_KEY}" --hostname="${DO_DROPLET_NAME}"
+    tailscale up --auth-key="$TS_KEY" --hostname="$TS_HOSTNAME"
+fi
+
+# ── Serve rules (check before applying) ──
+serve_out=$(tailscale serve status 2>&1 || true)
+has_poseidon=false
+has_gateway=false
+echo "$serve_out" | grep -q "localhost:${POS_PORT}" && has_poseidon=true
+echo "$serve_out" | grep -q "localhost:${GW_PORT}" && has_gateway=true
+
+if [[ "$has_poseidon" == "true" && "$has_gateway" == "true" ]]; then
+    echo "Tailscale serve rules already configured — skipping."
+else
+    if [[ "$TS_MODE" == "funnel" ]]; then
+        tailscale funnel --bg --https=8443 "http://localhost:${GW_PORT}"
+        tailscale serve --bg --https=443 "http://localhost:${POS_PORT}"
+        echo "Tailscale funnel configured."
+    else
+        tailscale serve --bg --https=8443 "http://localhost:${GW_PORT}"
+        tailscale serve --bg --https=443 "http://localhost:${POS_PORT}"
+        echo "Tailscale serve configured."
+    fi
 fi
 TAILSCALE
-
-    # Check if serve rules are already configured before applying
-    TS_SERVE_STATUS=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale serve status 2>&1' 2>/dev/null || true)
-    TS_HAS_POSEIDON=false
-    TS_HAS_GATEWAY=false
-    if echo "$TS_SERVE_STATUS" | grep -q "localhost:${POSEIDON_PORT}" 2>/dev/null; then
-        TS_HAS_POSEIDON=true
-    fi
-    if echo "$TS_SERVE_STATUS" | grep -q "localhost:${GATEWAY_PORT}" 2>/dev/null; then
-        TS_HAS_GATEWAY=true
-    fi
-
-    if [[ "$TS_HAS_POSEIDON" == "true" && "$TS_HAS_GATEWAY" == "true" ]]; then
-        log_info "Tailscale serve rules already configured — skipping."
-    else
-        log_info "Configuring Tailscale ${TAILSCALE_MODE} rules..."
-        if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
-            ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<TSFUNNEL
-set -euo pipefail
-tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
-tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
-echo "Tailscale funnel configured."
-TSFUNNEL
-        else
-            ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash <<TSSERVE
-set -euo pipefail
-tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
-tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
-echo "Tailscale serve configured."
-TSSERVE
-        fi
-    fi
-
     log_info "Tailscale configured ($TAILSCALE_MODE mode)."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 8: Smoke test
+# Phase 7: Smoke test
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Running post-deploy smoke test..."
+
+SMOKE_OUTPUT=$(remote_exec "$DROPLET_IP" bash -s \
+    "${POSEIDON_REPO:+yes}" "$TAILSCALE_ENABLED" \
+    "$POSEIDON_PORT" "$GATEWAY_PORT" <<'SMOKETEST'
+# No set -e: collect all results even if individual checks fail
+HAS_POSEIDON="$1"; TS_ENABLED="$2"
+POS_PORT="$3"; GW_PORT="$4"
+
+# OpenClaw service
+oc_status=$(systemctl is-active openclaw 2>/dev/null || echo "unknown")
+echo "OPENCLAW=$oc_status"
+
+# Poseidon service
+if [[ "$HAS_POSEIDON" == "yes" ]]; then
+    pos_status=$(systemctl is-active poseidon 2>/dev/null || echo "unknown")
+    echo "POSEIDON=$pos_status"
+fi
+
+# Tailscale
+if [[ "$TS_ENABLED" == "true" ]]; then
+    if ! command -v tailscale &>/dev/null; then
+        echo "TAILSCALE=not_installed"
+    elif ! tailscale status --self --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if d.get('Self',{}).get('Online') else 1)" 2>/dev/null; then
+        echo "TAILSCALE=not_online"
+    else
+        serve_out=$(tailscale serve status 2>&1)
+        missing=""
+        echo "$serve_out" | grep -q "localhost:${POS_PORT}" || missing="poseidon"
+        echo "$serve_out" | grep -q "localhost:${GW_PORT}" || missing="${missing:+$missing,}gateway"
+        if [[ -n "$missing" ]]; then
+            echo "TAILSCALE=serve_missing:$missing"
+        else
+            echo "TAILSCALE=ok"
+        fi
+    fi
+fi
+
+# Gateway port (poll up to 90s)
+gw_ready=false
+gw_elapsed=0
+while [[ $gw_elapsed -lt 90 ]]; do
+    if curl -sf -o /dev/null "http://localhost:${GW_PORT}" 2>/dev/null; then
+        gw_ready=true
+        break
+    fi
+    sleep 5
+    gw_elapsed=$((gw_elapsed + 5))
+done
+echo "GATEWAY=${gw_ready}:${gw_elapsed}"
+SMOKETEST
+)
+
+# Parse smoke test results
 SMOKE_OK=true
 
-# Check OpenClaw systemd service
-OC_STATUS=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" \
-    'systemctl is-active openclaw 2>/dev/null' || true)
-if [[ "$OC_STATUS" == "active" ]]; then
+oc_val=$(echo "$SMOKE_OUTPUT" | grep "^OPENCLAW=" | cut -d= -f2-)
+if [[ "$oc_val" == "active" ]]; then
     log_info "  OpenClaw service: active"
 else
-    log_error "  OpenClaw service: $OC_STATUS"
+    log_error "  OpenClaw service: $oc_val"
     SMOKE_OK=false
 fi
 
-# Check Poseidon systemd service
-if [[ -n "${POSEIDON_REPO:-}" ]]; then
-    POS_STATUS=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" \
-        'systemctl is-active poseidon 2>/dev/null' || true)
-    if [[ "$POS_STATUS" == "active" ]]; then
+pos_val=$(echo "$SMOKE_OUTPUT" | grep "^POSEIDON=" | cut -d= -f2- || true)
+if [[ -n "$pos_val" ]]; then
+    if [[ "$pos_val" == "active" ]]; then
         log_info "  Poseidon service: active"
     else
-        log_error "  Poseidon service: $POS_STATUS"
+        log_error "  Poseidon service: $pos_val"
         SMOKE_OK=false
     fi
 fi
 
-# Check Tailscale (if enabled)
-if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
-    TS_STATE=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" bash -s "${POSEIDON_PORT}" "${GATEWAY_PORT}" <<'TSSMOKE'
-POSEIDON_PORT="$1"
-GATEWAY_PORT="$2"
-if ! command -v tailscale &>/dev/null; then
-    echo "not_installed"
-    exit 0
-fi
-if ! tailscale status --self --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if d.get('Self',{}).get('Online') else 1)" 2>/dev/null; then
-    echo "not_online"
-    exit 0
-fi
-serve_out=$(tailscale serve status 2>&1)
-missing=""
-if ! echo "$serve_out" | grep -q "localhost:${POSEIDON_PORT}"; then
-    missing="poseidon"
-fi
-if ! echo "$serve_out" | grep -q "localhost:${GATEWAY_PORT}"; then
-    missing="${missing:+$missing,}gateway"
-fi
-if [[ -n "$missing" ]]; then
-    echo "serve_missing:$missing"
-else
-    echo "ok"
-fi
-TSSMOKE
-    )
-    case "$TS_STATE" in
+ts_val=$(echo "$SMOKE_OUTPUT" | grep "^TAILSCALE=" | cut -d= -f2- || true)
+if [[ -n "$ts_val" ]]; then
+    case "$ts_val" in
         ok)
             log_info "  Tailscale: online, serve configured" ;;
         not_installed)
@@ -605,28 +559,17 @@ TSSMOKE
             log_error "  Tailscale: installed but not online (auth may have failed)"
             SMOKE_OK=false ;;
         serve_missing:*)
-            log_warn "  Tailscale: online but serve incomplete (${TS_STATE#serve_missing:})" ;;
+            log_warn "  Tailscale: online but serve incomplete (${ts_val#serve_missing:})" ;;
         *)
-            log_warn "  Tailscale: unknown state ($TS_STATE)" ;;
+            log_warn "  Tailscale: unknown state ($ts_val)" ;;
     esac
 fi
 
-# Check gateway port (gateway takes ~60s to initialize)
-log_info "  Waiting up to 90s for gateway to start..."
-GW_READY=false
-GW_ELAPSED=0
-while [[ $GW_ELAPSED -lt 90 ]]; do
-    if ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
-        GW_READY=true
-        break
-    fi
-    sleep 5
-    GW_ELAPSED=$((GW_ELAPSED + 5))
-    printf "."
-done
-echo ""
-if [[ "$GW_READY" == "true" ]]; then
-    log_info "  Gateway port ${GATEWAY_PORT}: responding (took ~${GW_ELAPSED}s)"
+gw_val=$(echo "$SMOKE_OUTPUT" | grep "^GATEWAY=" | cut -d= -f2- || true)
+gw_ready="${gw_val%%:*}"
+gw_elapsed="${gw_val##*:}"
+if [[ "$gw_ready" == "true" ]]; then
+    log_info "  Gateway port ${GATEWAY_PORT}: responding (took ~${gw_elapsed}s)"
 else
     log_warn "  Gateway port ${GATEWAY_PORT}: not responding after 90s — may need more time"
 fi
@@ -636,8 +579,18 @@ if [[ "$SMOKE_OK" != "true" ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 9: Print connection summary
+# Phase 8: Save credentials + print summary
 # ═══════════════════════════════════════════════════════════════════════════════
+CREDS_FILE="$HOME/.openclaw/remote-credentials"
+mkdir -p "$HOME/.openclaw"
+cat > "$CREDS_FILE" <<CREDEOF
+# OpenTusk remote deployment credentials
+# Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+GATEWAY_TOKEN=$GATEWAY_TOKEN
+CREDEOF
+chmod 600 "$CREDS_FILE"
+
 log_info "Deployment complete!"
 echo ""
 echo "  Droplet IP:  $DROPLET_IP"
