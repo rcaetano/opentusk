@@ -196,23 +196,23 @@ else
             # Poseidon deploy key
             if [[ -n "${POSEIDON_REPO:-}" ]]; then
                 deploy_key_exists=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
-                    '[[ -f /root/.ssh/poseidon_deploy_key ]] && echo yes || echo no' 2>/dev/null || echo "no")
+                    '[[ -f /root/.ssh/do_proxy_ed25519 ]] && echo yes || echo no' 2>/dev/null || echo "no")
                 if [[ "$deploy_key_exists" == "yes" ]]; then
                     pass "Deploy key exists on remote"
                 else
-                    fail "Deploy key missing (/root/.ssh/poseidon_deploy_key)"
+                    fail "Deploy key missing (/root/.ssh/do_proxy_ed25519)"
                     if [[ "$AUTO_FIX" == "true" ]]; then
                         ssh "${DO_SSH_USER}@${DROPLET_IP}" \
-                            'ssh-keygen -t ed25519 -f /root/.ssh/poseidon_deploy_key -N "" -C "opentusk-deploy" >/dev/null 2>&1' 2>/dev/null \
+                            'ssh-keygen -t ed25519 -f /root/.ssh/do_proxy_ed25519 -N "" -C "opentusk-deploy" >/dev/null 2>&1' 2>/dev/null \
                             && fixed "Generated deploy key on remote" \
                             || fail "Could not generate deploy key"
                         log_warn "Deploy key created but must be added to GitHub as a deploy key."
-                        log_warn "Public key: $(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'cat /root/.ssh/poseidon_deploy_key.pub' 2>/dev/null)"
+                        log_warn "Public key: $(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'cat /root/.ssh/do_proxy_ed25519.pub' 2>/dev/null)"
                     fi
                 fi
 
                 ssh_config_ok=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
-                    'grep -q "poseidon_deploy_key" /root/.ssh/config 2>/dev/null && echo yes || echo no' 2>/dev/null || echo "no")
+                    'grep -q "do_proxy_ed25519" /root/.ssh/config 2>/dev/null && echo yes || echo no' 2>/dev/null || echo "no")
                 if [[ "$ssh_config_ok" == "yes" ]]; then
                     pass "SSH config references deploy key for github.com"
                 else
@@ -222,7 +222,7 @@ else
 cat >> /root/.ssh/config <<'SSHCONF'
 
 Host github.com
-    IdentityFile /root/.ssh/poseidon_deploy_key
+    IdentityFile /root/.ssh/do_proxy_ed25519
     StrictHostKeyChecking accept-new
 SSHCONF
 chmod 600 /root/.ssh/config

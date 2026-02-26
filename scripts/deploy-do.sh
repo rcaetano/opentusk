@@ -344,17 +344,17 @@ BUNINSTALL
     log_info "Setting up deploy key on remote..."
     DEPLOY_PUBKEY=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<'DEPLOYKEY'
 set -euo pipefail
-KEY_FILE="/root/.ssh/poseidon_deploy_key"
+KEY_FILE="/root/.ssh/do_proxy_ed25519"
 if [[ ! -f "$KEY_FILE" ]]; then
     ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "opentusk-deploy" >/dev/null 2>&1
 fi
 
 # Configure SSH to use this key for github.com
-if ! grep -q "poseidon_deploy_key" /root/.ssh/config 2>/dev/null; then
+if ! grep -q "do_proxy_ed25519" /root/.ssh/config 2>/dev/null; then
     cat >> /root/.ssh/config <<'SSHCONF'
 
 Host github.com
-    IdentityFile /root/.ssh/poseidon_deploy_key
+    IdentityFile /root/.ssh/do_proxy_ed25519
     StrictHostKeyChecking accept-new
 SSHCONF
     chmod 600 /root/.ssh/config
