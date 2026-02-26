@@ -12,6 +12,7 @@ DO_REGION="fra1"
 DO_SIZE="s-2vcpu-4gb"
 DO_IMAGE="openclaw"                           # DO marketplace image
 DO_SSH_KEY_FINGERPRINT=""                     # auto-detected or set manually
+DO_SSH_KEY_FILE=""                            # local SSH private key path (blank = ssh-agent default)
 DO_TAG="opentusk"
 DO_SSH_USER="root"                            # marketplace convention
 
@@ -35,6 +36,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -f "$PROJECT_ROOT/config.env" ]]; then
     source "$PROJECT_ROOT/config.env"
 fi
+
+# Expand tilde in SSH key path (config.env may contain ~/...)
+DO_SSH_KEY_FILE="${DO_SSH_KEY_FILE/#\~/$HOME}"
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 _RED='\033[0;31m'

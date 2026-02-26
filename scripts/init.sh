@@ -93,6 +93,7 @@ ask _DO_DROPLET       "Droplet name"    "$DO_DROPLET_NAME"
 ask _DO_REGION        "Region"           "$DO_REGION"
 ask _DO_SIZE          "Droplet size"     "$DO_SIZE"
 ask _DO_SSH_FP        "SSH key fingerprint (blank = auto-detect)" ""
+ask _DO_SSH_KEY       "Local SSH private key path (blank = ssh-agent default)" ""
 echo ""
 
 # ─── Section: Tailscale ──────────────────────────────────────────────────────
@@ -125,6 +126,7 @@ DO_DROPLET_NAME="$_DO_DROPLET"
 DO_REGION="$_DO_REGION"
 DO_SIZE="$_DO_SIZE"
 DO_SSH_KEY_FINGERPRINT="$_DO_SSH_FP"
+DO_SSH_KEY_FILE="$_DO_SSH_KEY"
 EOF
 
 # ─── Tailscale ─────────────────────────────────────────────────────────────

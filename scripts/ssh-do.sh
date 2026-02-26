@@ -49,10 +49,10 @@ fi
 if [[ "$TUNNEL" == "true" ]]; then
     log_info "Connecting with port forwarding (gateway: $GATEWAY_PORT, poseidon: $POSEIDON_PORT)..."
     log_info "Open http://localhost:${GATEWAY_PORT} in your browser once connected."
-    exec ssh -L "${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
+    exec ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} -L "${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
              -L "${POSEIDON_PORT}:localhost:${POSEIDON_PORT}" \
              "${DO_SSH_USER}@${IP}"
 else
     log_info "Connecting to ${DO_SSH_USER}@${IP}..."
-    exec ssh "${DO_SSH_USER}@${IP}"
+    exec ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}"
 fi

@@ -50,7 +50,7 @@ log_info "Upgrading remote at $IP..."
 # 1. Update OpenClaw via marketplace updater (or rollback)
 if [[ "$ROLLBACK" == "true" ]]; then
     log_info "Rolling back OpenClaw on remote..."
-    ssh "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
 set -euo pipefail
 if [[ -x /opt/rollback-openclaw.sh ]]; then
     /opt/rollback-openclaw.sh
@@ -61,7 +61,7 @@ systemctl restart openclaw
 OCUPDATE
 else
     log_info "Updating OpenClaw on remote..."
-    ssh "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
 set -euo pipefail
 if [[ -x /opt/update-openclaw.sh ]]; then
     /opt/update-openclaw.sh
@@ -75,7 +75,7 @@ fi
 # 2. Pull latest Poseidon source via git on the remote
 if [[ -n "${POSEIDON_REPO:-}" ]]; then
     log_info "Pulling latest Poseidon on remote..."
-    ssh "${DO_SSH_USER}@${IP}" bash <<POSPULL
+    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<POSPULL
 set -euo pipefail
 cd ${REMOTE_POSEIDON_DIR}
 git fetch origin
@@ -84,7 +84,7 @@ POSPULL
 
     # 3. Rebuild Poseidon + restart
     log_info "Rebuilding Poseidon on remote..."
-    ssh "${DO_SSH_USER}@${IP}" bash <<POSBUILD
+    ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<POSBUILD
 set -euo pipefail
 cd ${REMOTE_POSEIDON_DIR}
 pnpm install --frozen-lockfile
@@ -99,7 +99,7 @@ fi
 # 4. Verify Tailscale serve (re-apply if missing)
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     log_info "Verifying Tailscale serve configuration..."
-    SERVE_OK=$(ssh "${DO_SSH_USER}@${IP}" bash <<TSCHECK
+    SERVE_OK=$(ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<TSCHECK
 if ! command -v tailscale &>/dev/null; then
     echo "not_installed"
 elif ! tailscale serve status 2>&1 | grep -q "localhost:${POSEIDON_PORT}"; then
@@ -117,12 +117,12 @@ TSCHECK
     elif [[ "$SERVE_OK" != "ok" ]]; then
         log_warn "Tailscale serve incomplete ($SERVE_OK) — re-applying..."
         if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
-            ssh "${DO_SSH_USER}@${IP}" bash <<TSFUNNEL
+            ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<TSFUNNEL
 tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
 tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
 TSFUNNEL
         else
-            ssh "${DO_SSH_USER}@${IP}" bash <<TSSERVE
+            ssh ${DO_SSH_KEY_FILE:+-i "$DO_SSH_KEY_FILE"} "${DO_SSH_USER}@${IP}" bash <<TSSERVE
 tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
 tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
 TSSERVE
