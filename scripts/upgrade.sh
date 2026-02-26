@@ -78,6 +78,7 @@ if [[ -n "${POSEIDON_REPO:-}" ]]; then
     remote_exec "$IP" bash -s "$REMOTE_POSEIDON_DIR" "$POSEIDON_BRANCH" <<'POSBUILD'
 set -euo pipefail
 POS_DIR="$1"; POS_BRANCH="$2"
+git config --global --add safe.directory "$POS_DIR" 2>/dev/null || true
 cd "$POS_DIR"
 git fetch origin
 git reset --hard "origin/$POS_BRANCH"

@@ -364,6 +364,7 @@ POS_DIR="$1"; POS_REPO="$2"; POS_BRANCH="$3"
 POS_PORT="$4"; GW_PORT="$5"; GW_TOKEN="$6"
 
 # ── Git clone/pull ──
+git config --global --add safe.directory "$POS_DIR" 2>/dev/null || true
 if [[ -d "$POS_DIR/.git" ]]; then
     echo "Poseidon repo already cloned — pulling latest..."
     cd "$POS_DIR"
