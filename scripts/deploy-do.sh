@@ -243,7 +243,7 @@ PROVISION
 log_info "Deploying MustangClaw wrapper to remote..."
 rsync -avz --progress -e "ssh" \
     --exclude='openclaw/' --exclude='.git/' \
-    --exclude='node_modules/' --exclude='.mustangclaw/' \
+    --exclude='node_modules/' --exclude='.openclaw/' \
     "$PROJECT_ROOT/" "mustangclaw@${DROPLET_IP}:/home/mustangclaw/mustangclaw/"
 
 # Rsync poseidon source separately (private repo, can't clone on remote)
@@ -264,19 +264,19 @@ chmod +x mustangclaw
 ./mustangclaw build --no-pull
 
 # Seed config directory with correct permissions
-mkdir -p /home/mustangclaw/.mustangclaw/workspace
-chmod 700 /home/mustangclaw/.mustangclaw
-chmod 700 /home/mustangclaw/.mustangclaw/workspace
+mkdir -p /home/mustangclaw/.openclaw/workspace
+chmod 700 /home/mustangclaw/.openclaw
+chmod 700 /home/mustangclaw/.openclaw/workspace
 
-cat > /home/mustangclaw/.mustangclaw/config.env <<CFGEOF
+cat > /home/mustangclaw/.openclaw/config.env <<CFGEOF
 GATEWAY_PORT=${GATEWAY_PORT}
 BRIDGE_PORT=${BRIDGE_PORT}
 POSEIDON_PORT=${POSEIDON_PORT}
 CFGEOF
-chmod 600 /home/mustangclaw/.mustangclaw/config.env
+chmod 600 /home/mustangclaw/.openclaw/config.env
 
 # Write openclaw.json with gateway token
-cat > /home/mustangclaw/.mustangclaw/openclaw.json <<JSONEOF
+cat > /home/mustangclaw/.openclaw/openclaw.json <<JSONEOF
 {
   "gateway": {
     "mode": "local",
@@ -288,7 +288,7 @@ cat > /home/mustangclaw/.mustangclaw/openclaw.json <<JSONEOF
   }
 }
 JSONEOF
-chmod 600 /home/mustangclaw/.mustangclaw/openclaw.json
+chmod 600 /home/mustangclaw/.openclaw/openclaw.json
 
 # Start the gateway (generates .env, override, starts containers with Poseidon)
 ./mustangclaw run
@@ -347,8 +347,8 @@ echo "  Gateway:     ssh -L ${GATEWAY_PORT}:localhost:${GATEWAY_PORT} mustangcla
 echo "               then open http://localhost:${GATEWAY_PORT}"
 echo ""
 # Write credentials to a file instead of printing to terminal
-CREDS_FILE="$MUSTANGCLAW_CONFIG_DIR/remote-credentials"
-mkdir -p "$MUSTANGCLAW_CONFIG_DIR"
+CREDS_FILE="$OPENCLAW_CONFIG_DIR/remote-credentials"
+mkdir -p "$OPENCLAW_CONFIG_DIR"
 cat > "$CREDS_FILE" <<CREDEOF
 # MustangClaw remote deployment credentials
 # Droplet: $DO_DROPLET_NAME ($DROPLET_IP)

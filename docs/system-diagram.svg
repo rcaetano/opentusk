@@ -129,7 +129,7 @@
   <rect x="450" y="452" width="300" height="230" rx="8" fill="#181b22" stroke="#27272a"/>
   <text x="600" y="480" text-anchor="middle" fill="#fafafa" font-size="15" font-weight="600">Config Files</text>
   <text x="600" y="502" text-anchor="middle" fill="#14b8a6" font-size="12"
-        font-family="'JetBrains Mono', monospace">~/.mustangclaw/</text>
+        font-family="'JetBrains Mono', monospace">~/.openclaw/</text>
   <text x="600" y="532" text-anchor="middle" fill="#52525b" font-size="11"
         font-family="'JetBrains Mono', monospace">config.env</text>
   <text x="600" y="554" text-anchor="middle" fill="#52525b" font-size="11"
@@ -246,13 +246,13 @@
         font-family="'JetBrains Mono', monospace">:18790</text>
   <text x="690" y="1062" text-anchor="middle" fill="#52525b" font-size="11">internal communication</text>
 
-  <!-- .env Bridge -->
+  <!-- .env Config -->
   <rect x="860" y="980" width="260" height="120" rx="8" fill="#181b22" stroke="#27272a"/>
-  <text x="990" y="1010" text-anchor="middle" fill="#fafafa" font-size="14" font-weight="600">.env Bridge</text>
+  <text x="990" y="1010" text-anchor="middle" fill="#fafafa" font-size="14" font-weight="600">.env Config</text>
   <text x="990" y="1040" text-anchor="middle" fill="#52525b" font-size="11"
-        font-family="'JetBrains Mono', monospace">MUSTANGCLAW_*</text>
-  <text x="990" y="1064" text-anchor="middle" fill="#3f3f46" font-size="11"
-        font-family="'JetBrains Mono', monospace">  &#x2192; OPENCLAW_*</text>
+        font-family="'JetBrains Mono', monospace">OPENCLAW_IMAGE</text>
+  <text x="990" y="1064" text-anchor="middle" fill="#52525b" font-size="11"
+        font-family="'JetBrains Mono', monospace">OPENCLAW_GATEWAY_TOKEN</text>
 
   <!-- ================================================================ -->
   <!-- LAYER 4: CLOUD / REMOTE  y=1180..1460 -->
@@ -343,7 +343,7 @@
         fill="none" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="3,3"
         marker-end="url(#aVol)" opacity="0.6"/>
   <rect x="810" y="718" width="260" height="20" rx="4" fill="#12141a"/>
-  <text x="940" y="732" text-anchor="middle" fill="#f472b6" font-size="10" font-weight="600">Volume: ~/.mustangclaw &#x2192; .openclaw</text>
+  <text x="940" y="732" text-anchor="middle" fill="#f472b6" font-size="10" font-weight="600">Volume: ~/.openclaw &#x2192; .openclaw</text>
 
   <!-- Vite proxy → Poseidon API -->
   <path d="M950,682 L950,730 L920,730 L920,810"

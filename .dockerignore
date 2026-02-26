@@ -18,5 +18,5 @@ LICENSE
 **/dist
 
 # Exclude local config
-.mustangclaw/
+.openclaw/
 .env

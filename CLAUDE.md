@@ -5,7 +5,7 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 ## Quick Reference
 
 ```
-./mustangclaw init      # configure ports & DigitalOcean (writes ~/.mustangclaw/config.env)
+./mustangclaw init      # configure ports & DigitalOcean (writes ~/.openclaw/config.env)
 ./mustangclaw build     # clone openclaw repo & build Docker image (mustangclaw:local)
 ./mustangclaw run       # start gateway container locally
 ./mustangclaw setup     # run OpenClaw's onboarding wizard (API keys, models, auth)
@@ -44,7 +44,7 @@ scripts/
   rotate-tokens.sh       # rotate device tokens with full scope set
   deploy-do.sh           # provision DigitalOcean droplet
   destroy-do.sh          # tear down droplet
-  sync-config.sh         # sync ~/.mustangclaw to container (/home/node/.openclaw) or remote
+  sync-config.sh         # sync ~/.openclaw to container (/home/node/.openclaw) or remote
   upgrade.sh             # git pull + rebuild (local or remote)
   ssh-do.sh              # SSH into droplet with optional port forwarding
   cloud-init.yml         # cloud-init user data for droplet bootstrap
@@ -57,17 +57,17 @@ poseidon/                # upstream poseidon repo (git-ignored, created by build
 
 There are two layers of config:
 
-### 1. MustangClaw config (`~/.mustangclaw/config.env`)
+### 1. MustangClaw config (`~/.openclaw/config.env`)
 Written by `mustangclaw init`. Controls ports, DigitalOcean settings, and Tailscale configuration. Sourced by `scripts/config.sh` to override defaults.
 
-### 2. OpenClaw config (`~/.mustangclaw/openclaw.json`)
+### 2. OpenClaw config (`~/.openclaw/openclaw.json`)
 Written by `mustangclaw setup` (OpenClaw's onboarding wizard). Controls API keys, models, gateway auth. Mounted into the Docker container at `/home/node/.openclaw/`.
 
 Key variables from `scripts/config.sh`:
-- `MUSTANGCLAW_REPO` — upstream git URL
-- `MUSTANGCLAW_DIR` — local clone path (`./openclaw`)
-- `MUSTANGCLAW_IMAGE` — Docker image name (`mustangclaw:local`)
-- `MUSTANGCLAW_CONFIG_DIR` — user config dir (`~/.mustangclaw`)
+- `OPENCLAW_REPO` — upstream git URL
+- `OPENCLAW_DIR` — local clone path (`./openclaw`)
+- `OPENCLAW_IMAGE` — Docker image name (`mustangclaw:local`)
+- `OPENCLAW_CONFIG_DIR` — user config dir (`~/.openclaw`)
 - `GATEWAY_PORT` / `BRIDGE_PORT` / `POSEIDON_PORT` — Docker port mappings (18789 / 18790 / 18791)
 - `POSEIDON_REPO` — Poseidon git URL
 - `POSEIDON_DIR` — local Poseidon clone path (`./poseidon`)
@@ -94,15 +94,15 @@ The Docker entrypoint (`scripts/docker-entrypoint.sh`) includes `http://localhos
 ## Docker Architecture
 
 - The upstream `openclaw/docker-compose.yml` defines services `openclaw-gateway` and `openclaw-cli`
-- The `.env` file at `openclaw/.env` bridges our `MUSTANGCLAW_*` variables to the `OPENCLAW_*` names that docker-compose expects (including `OPENCLAW_GATEWAY_BIND=lan`)
+- The `.env` file at `openclaw/.env` passes our `OPENCLAW_*` variables to docker-compose (including `OPENCLAW_GATEWAY_BIND=lan`)
 - `mustangclaw run` patches `openclaw.json` on each start: sets `gateway.bind=lan`, removes `tailscale` config, and adds `controlUi.dangerouslyAllowHostHeaderOriginFallback=true` (all required for Docker networking compatibility)
 - A `docker-compose.override.yml` is generated to mount `scripts/docker-entrypoint.sh` as the container entrypoint — this re-applies the same patch on every container restart, preventing the setup wizard's hot-reload from re-introducing incompatible config
 - `mustangclaw tui` shares the gateway container's network namespace (`--network container:`) so `127.0.0.1` reaches the gateway (required by OpenClaw's loopback security check)
 - The gateway token (`OPENCLAW_GATEWAY_TOKEN`) is the API/device pairing token stored in `openclaw/.env` and passed to the container as an env var. This is separate from user-facing auth in `openclaw.json` (which may use `auth.mode: "password"` or `auth.mode: "token"`). `mustangclaw run` resolves the token from `openclaw.json` first, then `.env`, then generates a new one
-- Browser devices connecting to the dashboard must be **paired** (approved). `mustangclaw dashboard` handles this automatically. Device pairings are stored in `~/.mustangclaw/devices/` and go stale on gateway restarts
+- Browser devices connecting to the dashboard must be **paired** (approved). `mustangclaw dashboard` handles this automatically. Device pairings are stored in `~/.openclaw/devices/` and go stale on gateway restarts
 - The dashboard URL uses a **hash fragment** (`/#token=...`), not a query parameter
 - **Poseidon** (agent dashboard) is bundled into the image via `Dockerfile.poseidon` — a multi-stage overlay that builds the Vite frontend and copies the Bun API + static files into `/poseidon`. The entrypoint starts Poseidon in the background on `POSEIDON_PORT` (default 18791) before launching the gateway. When Poseidon is not bundled, the entrypoint skips it gracefully
-- **Path mapping**: Host `~/.mustangclaw` is mounted into the container as `/home/node/.openclaw` (via docker-compose volumes). All container-internal references use `.openclaw`; the `.mustangclaw` name is only used on the host side. `mustangclaw sync` copies to `/home/node/.openclaw/` inside the container
+- **Path mapping**: Host `~/.openclaw` is mounted into the container as `/home/node/.openclaw` (via docker-compose volumes). `mustangclaw sync` copies to `/home/node/.openclaw/` inside the container
 
 ## Build Options
 
@@ -140,7 +140,7 @@ Sandbox images isolate agent tool execution in separate containers with network 
 ./mustangclaw sandbox --all        # build all sandbox images
 ```
 
-After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
+After building, configure sandboxing in `~/.openclaw/openclaw.json`:
 
 ```json
 {
@@ -168,10 +168,10 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 - **Gateway crash-loop with "Missing config"**: Run `mustangclaw run` — it seeds `openclaw.json` if missing
 - **Gateway crash-loop with "tailscale serve/funnel requires bind=loopback"**: Run `mustangclaw run` — it auto-patches this
 - **Dashboard "pairing required"**: Run `mustangclaw dashboard` — it auto-approves device pairing. If it persists, clear browser localStorage for `localhost:18789` and retry
-- **Dashboard "device token mismatch"**: Clear `~/.mustangclaw/devices/`, restart gateway (`mustangclaw run --stop && mustangclaw run`), and clear browser localStorage for `localhost:18789`
+- **Dashboard "device token mismatch"**: Clear `~/.openclaw/devices/`, restart gateway (`mustangclaw run --stop && mustangclaw run`), and clear browser localStorage for `localhost:18789`
 - **Dashboard "gateway token missing"**: The token wasn't passed via the URL. Use `mustangclaw dashboard` or paste the token (from `mustangclaw token`) into Control UI settings
 - **TUI "device token mismatch"**: `mustangclaw tui` auto-clears device tokens; if it persists, run `mustangclaw run --stop && mustangclaw run`
-- **TUI "gateway not connected"**: Ensure gateway is running (`mustangclaw status`), then clear `~/.mustangclaw/devices/` and retry
+- **TUI "gateway not connected"**: Ensure gateway is running (`mustangclaw status`), then clear `~/.openclaw/devices/` and retry
 - **"session file locked" in dashboard chat**: Stale lock file from unclean shutdown. Remove it: `docker exec mustangclaw rm /home/node/.openclaw/agents/main/sessions/*.lock`
 - **Token mismatch between .env and openclaw.json**: `mustangclaw run` reads the token from `openclaw.json` to keep them aligned
 - **Gateway unhealthy but container running**: Run `mustangclaw status --health` to check application-level health
@@ -187,7 +187,7 @@ After building, configure sandboxing in `~/.mustangclaw/openclaw.json`:
 ```
 ./mustangclaw init              # set DO token, region, size
 ./mustangclaw deploy            # create & provision droplet
-./mustangclaw sync              # push ~/.mustangclaw config to remote
+./mustangclaw sync              # push ~/.openclaw config to remote
 ./mustangclaw ssh --tunnel      # SSH with port forwarding (gateway, bridge, poseidon)
 ./mustangclaw upgrade --target remote  # pull latest & rebuild on droplet
 ./mustangclaw audit --remote    # full sanity check including remote droplet
@@ -198,9 +198,9 @@ Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangcla
 
 ### Upgrading
 
-`~/.mustangclaw` (host) is a bind mount — it is **never** inside the Docker image and is preserved across rebuilds and restarts. Upgrades only rebuild the image and restart the container.
+`~/.openclaw` (host) is a bind mount — it is **never** inside the Docker image and is preserved across rebuilds and restarts. Upgrades only rebuild the image and restart the container.
 
-**Remote config is never overwritten.** When upgrading a remote droplet, if `~/.mustangclaw` already exists on the remote it is left untouched. If it doesn't exist (e.g., the droplet was recreated), it is seeded from the local `~/.mustangclaw`. Use `mustangclaw sync --target remote` to explicitly push local config to the remote.
+**Remote config is never overwritten.** When upgrading a remote droplet, if `~/.openclaw` already exists on the remote it is left untouched. If it doesn't exist (e.g., the droplet was recreated), it is seeded from the local `~/.openclaw`. Use `mustangclaw sync --target remote` to explicitly push local config to the remote.
 
 ```bash
 # Local: pull latest OpenClaw + Poseidon, rebuild, restart

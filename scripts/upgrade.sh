@@ -10,7 +10,7 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Upgrade MustangClaw by pulling the latest code and rebuilding the Docker image.
-Remote ~/.mustangclaw is never overwritten if it exists; seeded from local if absent.
+Remote ~/.openclaw is never overwritten if it exists; seeded from local if absent.
 
 Options:
   --target TARGET   "local" (default) or "remote"
@@ -52,25 +52,25 @@ if [[ "$TARGET" == "local" ]]; then
 
     cd "$PROJECT_ROOT"
 
-    if [[ ! -d "$MUSTANGCLAW_DIR" ]]; then
-        log_error "MustangClaw repo not found at $MUSTANGCLAW_DIR. Run build.sh first."
+    if [[ ! -d "$OPENCLAW_DIR" ]]; then
+        log_error "MustangClaw repo not found at $OPENCLAW_DIR. Run build.sh first."
         exit 1
     fi
 
-    OLD_SHA=$(git -C "$MUSTANGCLAW_DIR" rev-parse --short HEAD)
+    OLD_SHA=$(git -C "$OPENCLAW_DIR" rev-parse --short HEAD)
 
     if [[ "$ROLLBACK" == "true" ]]; then
         log_warn "Rolling back to previous commit..."
-        git -C "$MUSTANGCLAW_DIR" checkout HEAD~1
+        git -C "$OPENCLAW_DIR" checkout HEAD~1
     else
         log_info "Pulling latest changes..."
-        git -C "$MUSTANGCLAW_DIR" pull
+        git -C "$OPENCLAW_DIR" pull
     fi
 
-    NEW_SHA=$(git -C "$MUSTANGCLAW_DIR" rev-parse --short HEAD)
+    NEW_SHA=$(git -C "$OPENCLAW_DIR" rev-parse --short HEAD)
 
     log_info "Building Docker image..."
-    docker build -t "$MUSTANGCLAW_IMAGE" "$MUSTANGCLAW_DIR"
+    docker build -t "$OPENCLAW_IMAGE" "$OPENCLAW_DIR"
 
     # ─── Update Poseidon ──────────────────────────────────────────────────
     if [[ -d "$POSEIDON_DIR" ]]; then
@@ -85,7 +85,7 @@ if [[ "$TARGET" == "local" ]]; then
             log_info "Poseidon directory is not a git repo (rsynced copy) — skipping pull."
         fi
         log_info "Rebuilding Poseidon overlay..."
-        docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$MUSTANGCLAW_IMAGE" "$PROJECT_ROOT"
+        docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$OPENCLAW_IMAGE" "$PROJECT_ROOT"
     fi
 
     # Restart via 'mustangclaw run' to apply config patches (bind=lan, token sync, etc.)
@@ -118,7 +118,7 @@ fi
 log_info "Syncing wrapper project to remote..."
 rsync -avz --progress -e "ssh" \
     --exclude='openclaw/' --exclude='poseidon/' --exclude='.git/' \
-    --exclude='node_modules/' --exclude='.mustangclaw/' \
+    --exclude='node_modules/' --exclude='.openclaw/' \
     "$PROJECT_ROOT/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/"
 
 # Sync poseidon source to remote (private repo — can't git clone on remote)
@@ -129,18 +129,21 @@ if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
         "$PROJECT_ROOT/poseidon/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/poseidon/"
 fi
 
+# Auto-migrate remote ~/.mustangclaw → ~/.openclaw
+ssh "mustangclaw@${IP}" 'if [[ -d /home/mustangclaw/.mustangclaw && ! -d /home/mustangclaw/.openclaw ]]; then mv /home/mustangclaw/.mustangclaw /home/mustangclaw/.openclaw; echo "Migrated remote config: ~/.mustangclaw -> ~/.openclaw"; fi'
+
 # Seed remote config from local if it doesn't exist yet (NEVER overwrite existing)
-REMOTE_CONFIG_EXISTS=$(ssh "mustangclaw@${IP}" '[[ -d /home/mustangclaw/.mustangclaw ]] && echo yes || echo no')
+REMOTE_CONFIG_EXISTS=$(ssh "mustangclaw@${IP}" '[[ -d /home/mustangclaw/.openclaw ]] && echo yes || echo no')
 if [[ "$REMOTE_CONFIG_EXISTS" == "no" ]]; then
-    if [[ -d "$MUSTANGCLAW_CONFIG_DIR" ]]; then
-        log_info "Remote ~/.mustangclaw not found — seeding from local config..."
+    if [[ -d "$OPENCLAW_CONFIG_DIR" ]]; then
+        log_info "Remote ~/.openclaw not found — seeding from local config..."
         rsync -avz --progress -e "ssh" \
-            "$MUSTANGCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.mustangclaw/"
+            "$OPENCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.openclaw/"
     else
-        log_warn "Remote ~/.mustangclaw not found and no local config to seed."
+        log_warn "Remote ~/.openclaw not found and no local config to seed."
     fi
 else
-    log_info "Remote ~/.mustangclaw exists — preserving remote config (not overwriting)."
+    log_info "Remote ~/.openclaw exists — preserving remote config (not overwriting)."
 fi
 
 # Run upgrade on remote: pull openclaw, rebuild images (poseidon uses rsynced source),

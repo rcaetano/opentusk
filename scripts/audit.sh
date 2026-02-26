@@ -56,16 +56,16 @@ cd "$PROJECT_ROOT"
 # ═════════════════════════════════════════════════════════════════════════════
 printf "\n${_CYAN}── 1. Configuration ──${_NC}\n"
 
-if [[ -d "$MUSTANGCLAW_CONFIG_DIR" ]]; then
-    pass "Config directory exists: $MUSTANGCLAW_CONFIG_DIR"
+if [[ -d "$OPENCLAW_CONFIG_DIR" ]]; then
+    pass "Config directory exists: $OPENCLAW_CONFIG_DIR"
 else
-    fail "Config directory missing: $MUSTANGCLAW_CONFIG_DIR"
+    fail "Config directory missing: $OPENCLAW_CONFIG_DIR"
 fi
 
-if [[ -f "$MUSTANGCLAW_CONFIG_DIR/config.env" ]]; then
+if [[ -f "$OPENCLAW_CONFIG_DIR/config.env" ]]; then
     pass "config.env exists"
     # Check key variables
-    source "$MUSTANGCLAW_CONFIG_DIR/config.env" 2>/dev/null || true
+    source "$OPENCLAW_CONFIG_DIR/config.env" 2>/dev/null || true
     if [[ -n "${GATEWAY_PORT:-}" ]]; then
         pass "GATEWAY_PORT=${GATEWAY_PORT}"
     else
@@ -80,7 +80,7 @@ else
     fail "config.env missing — run 'mustangclaw init'"
 fi
 
-OPENCLAW_JSON="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+OPENCLAW_JSON="$OPENCLAW_CONFIG_DIR/openclaw.json"
 if [[ -f "$OPENCLAW_JSON" ]]; then
     pass "openclaw.json exists"
     # Validate JSON
@@ -111,7 +111,7 @@ else
 fi
 
 # Check .env token alignment
-ENV_FILE="$MUSTANGCLAW_DIR/.env"
+ENV_FILE="$OPENCLAW_DIR/.env"
 if [[ -f "$ENV_FILE" ]]; then
     env_token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
     if [[ -n "$local_token" && -n "$env_token" ]]; then
@@ -192,12 +192,12 @@ fi
 # ═════════════════════════════════════════════════════════════════════════════
 printf "\n${_CYAN}── 3. Repositories ──${_NC}\n"
 
-if [[ -d "$MUSTANGCLAW_DIR/.git" ]]; then
-    pass "OpenClaw repo exists at $MUSTANGCLAW_DIR"
-    oc_branch=$(git -C "$MUSTANGCLAW_DIR" branch --show-current 2>/dev/null || echo "detached")
+if [[ -d "$OPENCLAW_DIR/.git" ]]; then
+    pass "OpenClaw repo exists at $OPENCLAW_DIR"
+    oc_branch=$(git -C "$OPENCLAW_DIR" branch --show-current 2>/dev/null || echo "detached")
     pass "OpenClaw branch: $oc_branch"
-    if git -C "$MUSTANGCLAW_DIR" fetch --dry-run 2>/dev/null; then
-        behind=$(git -C "$MUSTANGCLAW_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
+    if git -C "$OPENCLAW_DIR" fetch --dry-run 2>/dev/null; then
+        behind=$(git -C "$OPENCLAW_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
         if [[ "$behind" == "0" ]]; then
             pass "OpenClaw up to date with upstream"
         elif [[ "$behind" != "?" ]]; then
@@ -237,24 +237,24 @@ if ! command -v docker &>/dev/null; then
     fail "Docker not installed"
 else
     pass "Docker installed"
-    image_info=$(docker images "$MUSTANGCLAW_IMAGE" --format '{{.Size}} (created {{.CreatedSince}})' 2>/dev/null | head -1)
+    image_info=$(docker images "$OPENCLAW_IMAGE" --format '{{.Size}} (created {{.CreatedSince}})' 2>/dev/null | head -1)
     if [[ -n "$image_info" ]]; then
-        pass "Image $MUSTANGCLAW_IMAGE exists: $image_info"
+        pass "Image $OPENCLAW_IMAGE exists: $image_info"
         # Check if Poseidon is bundled
-        has_poseidon=$(docker run --rm --entrypoint sh "$MUSTANGCLAW_IMAGE" -c 'test -d /poseidon && echo yes || echo no' 2>/dev/null || echo "error")
+        has_poseidon=$(docker run --rm --entrypoint sh "$OPENCLAW_IMAGE" -c 'test -d /poseidon && echo yes || echo no' 2>/dev/null || echo "error")
         if [[ "$has_poseidon" == "yes" ]]; then
             pass "Poseidon bundled in image (/poseidon exists)"
         else
             fail "Poseidon NOT bundled in image — rebuild with 'mustangclaw build'"
         fi
-        has_bun=$(docker run --rm --entrypoint sh "$MUSTANGCLAW_IMAGE" -c 'which bun >/dev/null 2>&1 && echo yes || echo no' 2>/dev/null || echo "error")
+        has_bun=$(docker run --rm --entrypoint sh "$OPENCLAW_IMAGE" -c 'which bun >/dev/null 2>&1 && echo yes || echo no' 2>/dev/null || echo "error")
         if [[ "$has_bun" == "yes" ]]; then
             pass "bun binary present in image"
         else
             fail "bun missing from image — rebuild with 'mustangclaw build'"
         fi
     else
-        fail "Image $MUSTANGCLAW_IMAGE not found — run 'mustangclaw build'"
+        fail "Image $OPENCLAW_IMAGE not found — run 'mustangclaw build'"
     fi
 fi
 

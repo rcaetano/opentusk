@@ -53,33 +53,33 @@ require_cmd docker
 # ─── Clone or update ────────────────────────────────────────────────────────
 cd "$PROJECT_ROOT"
 
-if [[ ! -d "$MUSTANGCLAW_DIR" ]]; then
+if [[ ! -d "$OPENCLAW_DIR" ]]; then
     log_info "Cloning MustangClaw repository..."
-    git clone "$MUSTANGCLAW_REPO" "$MUSTANGCLAW_DIR"
+    git clone "$OPENCLAW_REPO" "$OPENCLAW_DIR"
 elif [[ "$NO_PULL" == "false" ]]; then
     log_info "Updating MustangClaw repository..."
     # Stash local patches (e.g. upstream build fixes), pull, then reapply
     local_changes=false
-    if ! git -C "$MUSTANGCLAW_DIR" diff --quiet 2>/dev/null; then
+    if ! git -C "$OPENCLAW_DIR" diff --quiet 2>/dev/null; then
         local_changes=true
-        git -C "$MUSTANGCLAW_DIR" stash --quiet
+        git -C "$OPENCLAW_DIR" stash --quiet
     fi
-    git -C "$MUSTANGCLAW_DIR" pull
+    git -C "$OPENCLAW_DIR" pull
     if [[ "$local_changes" == "true" ]]; then
-        if git -C "$MUSTANGCLAW_DIR" stash pop --quiet 2>/dev/null; then
+        if git -C "$OPENCLAW_DIR" stash pop --quiet 2>/dev/null; then
             log_info "Re-applied local patches."
         else
             log_warn "Local patches conflict with upstream — dropped. You may need to re-patch."
-            git -C "$MUSTANGCLAW_DIR" checkout -- .
+            git -C "$OPENCLAW_DIR" checkout -- .
         fi
     fi
 else
     log_info "Skipping git pull (--no-pull)."
 fi
 
-if [[ -n "${MUSTANGCLAW_REF:-}" ]]; then
-    log_info "Pinning MustangClaw to ref $MUSTANGCLAW_REF..."
-    git -C "$MUSTANGCLAW_DIR" checkout "$MUSTANGCLAW_REF"
+if [[ -n "${OPENCLAW_REF:-}" ]]; then
+    log_info "Pinning MustangClaw to ref $OPENCLAW_REF..."
+    git -C "$OPENCLAW_DIR" checkout "$OPENCLAW_REF"
 fi
 
 # ─── Build Docker image ─────────────────────────────────────────────────────
@@ -93,8 +93,8 @@ if [[ -n "$INSTALL_BROWSER" ]]; then
     log_info "Browser support: enabled (adds ~300MB for Chromium/Playwright)"
 fi
 
-log_info "Building Docker image $MUSTANGCLAW_IMAGE..."
-docker build "${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}" -t "$MUSTANGCLAW_IMAGE" "$MUSTANGCLAW_DIR"
+log_info "Building Docker image $OPENCLAW_IMAGE..."
+docker build "${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}" -t "$OPENCLAW_IMAGE" "$OPENCLAW_DIR"
 
 # ─── Clone or update Poseidon ──────────────────────────────────────────────
 if [[ ! -d "$POSEIDON_DIR" ]]; then
@@ -109,14 +109,14 @@ else
 fi
 
 # ─── Build Poseidon overlay image ──────────────────────────────────────────
-log_info "Building Poseidon overlay onto $MUSTANGCLAW_IMAGE..."
-docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$MUSTANGCLAW_IMAGE" "$PROJECT_ROOT"
+log_info "Building Poseidon overlay onto $OPENCLAW_IMAGE..."
+docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$OPENCLAW_IMAGE" "$PROJECT_ROOT"
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
-IMAGE_ID=$(docker images --no-trunc --format '{{.ID}}' "$MUSTANGCLAW_IMAGE" | head -1)
-IMAGE_SIZE=$(docker images --format '{{.Size}}' "$MUSTANGCLAW_IMAGE" | head -1)
+IMAGE_ID=$(docker images --no-trunc --format '{{.ID}}' "$OPENCLAW_IMAGE" | head -1)
+IMAGE_SIZE=$(docker images --format '{{.Size}}' "$OPENCLAW_IMAGE" | head -1)
 
 log_info "Build complete."
-log_info "  Image: $MUSTANGCLAW_IMAGE"
+log_info "  Image: $OPENCLAW_IMAGE"
 log_info "  ID:    $IMAGE_ID"
 log_info "  Size:  $IMAGE_SIZE"

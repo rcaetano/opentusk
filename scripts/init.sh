@@ -11,7 +11,7 @@ Usage: $(basename "$0") [OPTIONS]
 
 Interactive wizard to configure MustangClaw.
 
-Creates ~/.mustangclaw/config.env with your settings. All values have
+Creates ~/.openclaw/config.env with your settings. All values have
 sensible defaults — just press Enter to accept them.
 
 Options:
@@ -32,7 +32,7 @@ for arg in "$@"; do
 done
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
-CONFIG_FILE="$MUSTANGCLAW_CONFIG_DIR/config.env"
+CONFIG_FILE="$OPENCLAW_CONFIG_DIR/config.env"
 
 # Prompt with a default value.  Usage: ask VAR "Prompt text" "default"
 ask() {
@@ -87,10 +87,10 @@ if [[ -f "$CONFIG_FILE" && "$RESET" != "true" ]]; then
 fi
 
 # ─── Create directories ─────────────────────────────────────────────────────
-mkdir -p "$MUSTANGCLAW_CONFIG_DIR"
-chmod 700 "$MUSTANGCLAW_CONFIG_DIR"
-mkdir -p "$MUSTANGCLAW_WORKSPACE_DIR"
-chmod 700 "$MUSTANGCLAW_WORKSPACE_DIR"
+mkdir -p "$OPENCLAW_CONFIG_DIR"
+chmod 700 "$OPENCLAW_CONFIG_DIR"
+mkdir -p "$OPENCLAW_WORKSPACE_DIR"
+chmod 700 "$OPENCLAW_WORKSPACE_DIR"
 
 # ─── Section: Ports ─────────────────────────────────────────────────────────
 printf "${_GREEN}── Ports ──${_NC}\n"
@@ -180,7 +180,7 @@ fi
 chmod 600 "$CONFIG_FILE"
 
 # ─── Write openclaw.json (gateway config) ──────────────────────────────────
-OPENCLAW_JSON="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+OPENCLAW_JSON="$OPENCLAW_CONFIG_DIR/openclaw.json"
 if [[ ! -f "$OPENCLAW_JSON" ]]; then
     cat > "$OPENCLAW_JSON" <<'JSONEOF'
 {
@@ -197,8 +197,8 @@ fi
 echo "─────────────────────────────────────"
 log_info "Config saved to $CONFIG_FILE"
 log_info "Directories created:"
-log_info "  $MUSTANGCLAW_CONFIG_DIR"
-log_info "  $MUSTANGCLAW_WORKSPACE_DIR"
+log_info "  $OPENCLAW_CONFIG_DIR"
+log_info "  $OPENCLAW_WORKSPACE_DIR"
 echo ""
 log_info "Next steps:"
 echo "  mustangclaw build   — clone repo & build Docker image"

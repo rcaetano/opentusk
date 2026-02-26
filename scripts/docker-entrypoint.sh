@@ -1,4 +1,8 @@
 #!/bin/sh
+# Install openclaw CLI wrapper on PATH (needed by dashboard memory search, etc.)
+printf '#!/bin/sh\ncd /app && exec node dist/index.js "$@"\n' > /usr/local/bin/openclaw
+chmod +x /usr/local/bin/openclaw
+
 # Patch openclaw.json before starting the gateway.
 # The 'mustangclaw setup' wizard may set gateway.bind=loopback and add tailscale
 # config, which conflicts with Docker networking.

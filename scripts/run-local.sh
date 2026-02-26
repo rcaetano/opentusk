@@ -45,8 +45,8 @@ require_cmd docker
 
 cd "$PROJECT_ROOT"
 
-if [[ ! -d "$MUSTANGCLAW_DIR" ]]; then
-    log_error "MustangClaw repo not found at $MUSTANGCLAW_DIR. Run build.sh first."
+if [[ ! -d "$OPENCLAW_DIR" ]]; then
+    log_error "MustangClaw repo not found at $OPENCLAW_DIR. Run build.sh first."
     exit 1
 fi
 
@@ -60,21 +60,21 @@ if [[ "$STOP" == "true" ]]; then
 fi
 
 # ─── Ensure config directories ──────────────────────────────────────────────
-mkdir -p "$MUSTANGCLAW_CONFIG_DIR"
-chmod 700 "$MUSTANGCLAW_CONFIG_DIR"
-mkdir -p "$MUSTANGCLAW_WORKSPACE_DIR"
-chmod 700 "$MUSTANGCLAW_WORKSPACE_DIR"
+mkdir -p "$OPENCLAW_CONFIG_DIR"
+chmod 700 "$OPENCLAW_CONFIG_DIR"
+mkdir -p "$OPENCLAW_WORKSPACE_DIR"
+chmod 700 "$OPENCLAW_WORKSPACE_DIR"
 
 # ─── Clear stale device tokens ──────────────────────────────────────────────
 # Device tokens from previous sessions cause "device token mismatch" errors
 # in the TUI. Clear them so fresh tokens are issued on next connect.
-if ls "$MUSTANGCLAW_CONFIG_DIR/devices/"* &>/dev/null; then
-    rm -f "$MUSTANGCLAW_CONFIG_DIR/devices/"*
+if ls "$OPENCLAW_CONFIG_DIR/devices/"* &>/dev/null; then
+    rm -f "$OPENCLAW_CONFIG_DIR/devices/"*
     log_info "Cleared stale device tokens."
 fi
 
 # ─── Seed openclaw.json if missing ─────────────────────────────────────────
-OPENCLAW_JSON="$MUSTANGCLAW_CONFIG_DIR/openclaw.json"
+OPENCLAW_JSON="$OPENCLAW_CONFIG_DIR/openclaw.json"
 if [[ ! -f "$OPENCLAW_JSON" ]]; then
     log_info "Seeding minimal openclaw.json (gateway.mode=local)..."
     cat > "$OPENCLAW_JSON" <<'JSONEOF'
@@ -98,7 +98,7 @@ fi
 # ─── Resolve gateway token ────────────────────────────────────────────────────
 # Prefer the token from openclaw.json (written by 'mustangclaw setup'), then
 # fall back to the .env, and finally generate a new one.
-ENV_FILE="$MUSTANGCLAW_DIR/.env"
+ENV_FILE="$OPENCLAW_DIR/.env"
 GATEWAY_TOKEN=""
 
 GATEWAY_TOKEN=$(read_json_token "$OPENCLAW_JSON")
@@ -131,10 +131,10 @@ else
 fi
 
 cat > "$ENV_FILE" <<EOF
-OPENCLAW_IMAGE=$MUSTANGCLAW_IMAGE
+OPENCLAW_IMAGE=$OPENCLAW_IMAGE
 OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN
-OPENCLAW_CONFIG_DIR=$MUSTANGCLAW_CONFIG_DIR
-OPENCLAW_WORKSPACE_DIR=$MUSTANGCLAW_WORKSPACE_DIR
+OPENCLAW_CONFIG_DIR=$OPENCLAW_CONFIG_DIR
+OPENCLAW_WORKSPACE_DIR=$OPENCLAW_WORKSPACE_DIR
 OPENCLAW_GATEWAY_BIND=lan
 POSEIDON_PORT=$POSEIDON_PORT
 EOF
@@ -148,7 +148,7 @@ fi
 # preventing the setup wizard's hot-reload from re-introducing tailscale/loopback
 # config that conflicts with Docker networking.
 ENTRYPOINT_SRC="$PROJECT_ROOT/scripts/docker-entrypoint.sh"
-OVERRIDE_FILE="$MUSTANGCLAW_DIR/docker-compose.override.yml"
+OVERRIDE_FILE="$OPENCLAW_DIR/docker-compose.override.yml"
 
 # Build the extra volumes list
 EXTRA_VOLUMES=""
@@ -197,7 +197,7 @@ volumes:
 YMLEOF
 fi
 
-COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
+COMPOSE_FILES=(-f "$OPENCLAW_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
 
 # ─── Rebuild if requested ───────────────────────────────────────────────────
 if [[ "$REBUILD" == "true" ]]; then

@@ -78,8 +78,8 @@ fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 log_info "Load complete."
-if docker image inspect "$MUSTANGCLAW_IMAGE" &>/dev/null; then
-    IMAGE_SIZE=$(docker images --format '{{.Size}}' "$MUSTANGCLAW_IMAGE" | head -1)
-    log_info "  Image: $MUSTANGCLAW_IMAGE"
+if docker image inspect "$OPENCLAW_IMAGE" &>/dev/null; then
+    IMAGE_SIZE=$(docker images --format '{{.Size}}' "$OPENCLAW_IMAGE" | head -1)
+    log_info "  Image: $OPENCLAW_IMAGE"
     log_info "  Size:  $IMAGE_SIZE"
 fi

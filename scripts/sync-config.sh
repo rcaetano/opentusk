@@ -9,7 +9,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Sync local ~/.mustangclaw configuration to the local container or remote droplet.
+Sync local ~/.openclaw configuration to the local container or remote droplet.
 
 Options:
   --target TARGET   "local" (default) or "remote"
@@ -46,8 +46,8 @@ if [[ "$TARGET" != "local" && "$TARGET" != "remote" ]]; then
 fi
 
 # ─── Validate source ────────────────────────────────────────────────────────
-if [[ ! -d "$MUSTANGCLAW_CONFIG_DIR" ]]; then
-    log_error "Config directory $MUSTANGCLAW_CONFIG_DIR does not exist. Nothing to sync."
+if [[ ! -d "$OPENCLAW_CONFIG_DIR" ]]; then
+    log_error "Config directory $OPENCLAW_CONFIG_DIR does not exist. Nothing to sync."
     exit 1
 fi
 
@@ -58,14 +58,14 @@ if [[ "$TARGET" == "local" ]]; then
     CONTAINER="mustangclaw"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY RUN] Would copy $MUSTANGCLAW_CONFIG_DIR/. to $CONTAINER:/home/node/.openclaw/"
+        log_info "[DRY RUN] Would copy $OPENCLAW_CONFIG_DIR/. to $CONTAINER:/home/node/.openclaw/"
         log_info "[DRY RUN] Would chown -R 1000:1000 /home/node/.openclaw inside container"
         log_info "[DRY RUN] Would restart $CONTAINER"
         exit 0
     fi
 
-    log_info "Copying $MUSTANGCLAW_CONFIG_DIR to local container..."
-    docker cp "$MUSTANGCLAW_CONFIG_DIR/." "$CONTAINER:/home/node/.openclaw/"
+    log_info "Copying $OPENCLAW_CONFIG_DIR to local container..."
+    docker cp "$OPENCLAW_CONFIG_DIR/." "$CONTAINER:/home/node/.openclaw/"
 
     log_info "Fixing ownership..."
     docker exec "$CONTAINER" chown -R 1000:1000 /home/node/.openclaw
@@ -93,9 +93,12 @@ if [[ "$DRY_RUN" == "true" ]]; then
     RSYNC_FLAGS+=(--dry-run)
 fi
 
-log_info "Syncing $MUSTANGCLAW_CONFIG_DIR to mustangclaw@${IP}..."
+# Auto-migrate remote ~/.mustangclaw → ~/.openclaw
+ssh "mustangclaw@${IP}" 'if [[ -d /home/mustangclaw/.mustangclaw && ! -d /home/mustangclaw/.openclaw ]]; then mv /home/mustangclaw/.mustangclaw /home/mustangclaw/.openclaw; echo "Migrated remote config: ~/.mustangclaw -> ~/.openclaw"; fi'
+
+log_info "Syncing $OPENCLAW_CONFIG_DIR to mustangclaw@${IP}..."
 rsync "${RSYNC_FLAGS[@]}" -e "ssh" \
-    "$MUSTANGCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.mustangclaw/"
+    "$OPENCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.openclaw/"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     log_info "[DRY RUN] Would chown and restart on remote."
@@ -104,7 +107,7 @@ fi
 
 log_info "Fixing ownership and restarting gateway on remote..."
 ssh "mustangclaw@${IP}" '
-    sudo chown -R 1000:1000 /home/mustangclaw/.mustangclaw
+    sudo chown -R 1000:1000 /home/mustangclaw/.openclaw
     docker restart mustangclaw
 '
 

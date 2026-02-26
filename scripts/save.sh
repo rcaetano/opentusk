@@ -9,7 +9,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Export the $MUSTANGCLAW_IMAGE Docker image to a compressed archive.
+Export the $OPENCLAW_IMAGE Docker image to a compressed archive.
 
 Options:
   --output PATH    Output file path (default: ./mustangclaw-local.tar.gz)
@@ -51,18 +51,18 @@ fi
 require_cmd docker
 
 # ─── Validate image exists ───────────────────────────────────────────────────
-if ! docker image inspect "$MUSTANGCLAW_IMAGE" &>/dev/null; then
-    log_error "Image '$MUSTANGCLAW_IMAGE' not found. Run 'mustangclaw build' first."
+if ! docker image inspect "$OPENCLAW_IMAGE" &>/dev/null; then
+    log_error "Image '$OPENCLAW_IMAGE' not found. Run 'mustangclaw build' first."
     exit 1
 fi
 
 # ─── Save image ──────────────────────────────────────────────────────────────
-log_info "Saving $MUSTANGCLAW_IMAGE to $OUTPUT..."
+log_info "Saving $OPENCLAW_IMAGE to $OUTPUT..."
 
 if [[ "$COMPRESS" == "true" ]]; then
-    docker save "$MUSTANGCLAW_IMAGE" | gzip > "$OUTPUT"
+    docker save "$OPENCLAW_IMAGE" | gzip > "$OUTPUT"
 else
-    docker save "$MUSTANGCLAW_IMAGE" -o "$OUTPUT"
+    docker save "$OPENCLAW_IMAGE" -o "$OUTPUT"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ Images built:
   openclaw-sandbox-common:bookworm-slim    Extended tooling (Node, pnpm, Bun, dev tools)
   openclaw-sandbox-browser:bookworm-slim   Browser automation (Chromium, Playwright)
 
-After building, configure sandboxing in ~/.mustangclaw/openclaw.json:
+After building, configure sandboxing in ~/.openclaw/openclaw.json:
 
   {
     "agents": {
@@ -69,8 +69,8 @@ require_cmd docker
 
 cd "$PROJECT_ROOT"
 
-if [[ ! -d "$MUSTANGCLAW_DIR" ]]; then
-    log_error "MustangClaw repo not found at $MUSTANGCLAW_DIR. Run 'mustangclaw build' first."
+if [[ ! -d "$OPENCLAW_DIR" ]]; then
+    log_error "MustangClaw repo not found at $OPENCLAW_DIR. Run 'mustangclaw build' first."
     exit 1
 fi
 
@@ -78,11 +78,11 @@ fi
 BASE_IMAGE="openclaw-sandbox:bookworm-slim"
 log_info "Building base sandbox image: $BASE_IMAGE ..."
 
-if [[ -f "$MUSTANGCLAW_DIR/Dockerfile.sandbox" ]]; then
-    docker build -t "$BASE_IMAGE" -f "$MUSTANGCLAW_DIR/Dockerfile.sandbox" "$MUSTANGCLAW_DIR"
+if [[ -f "$OPENCLAW_DIR/Dockerfile.sandbox" ]]; then
+    docker build -t "$BASE_IMAGE" -f "$OPENCLAW_DIR/Dockerfile.sandbox" "$OPENCLAW_DIR"
     log_info "Built $BASE_IMAGE"
 else
-    log_error "Dockerfile.sandbox not found in $MUSTANGCLAW_DIR"
+    log_error "Dockerfile.sandbox not found in $OPENCLAW_DIR"
     log_error "Make sure the upstream repo is up to date: mustangclaw build"
     exit 1
 fi
@@ -90,13 +90,13 @@ fi
 # ─── Build common sandbox (extended tooling) ────────────────────────────────
 if [[ "$BUILD_COMMON" == "true" ]]; then
     COMMON_IMAGE="openclaw-sandbox-common:bookworm-slim"
-    if [[ -f "$MUSTANGCLAW_DIR/Dockerfile.sandbox-common" ]]; then
+    if [[ -f "$OPENCLAW_DIR/Dockerfile.sandbox-common" ]]; then
         log_info "Building common sandbox image: $COMMON_IMAGE ..."
-        docker build -t "$COMMON_IMAGE" -f "$MUSTANGCLAW_DIR/Dockerfile.sandbox-common" "$MUSTANGCLAW_DIR"
+        docker build -t "$COMMON_IMAGE" -f "$OPENCLAW_DIR/Dockerfile.sandbox-common" "$OPENCLAW_DIR"
         log_info "Built $COMMON_IMAGE"
-    elif [[ -f "$MUSTANGCLAW_DIR/scripts/sandbox-common-setup.sh" ]]; then
+    elif [[ -f "$OPENCLAW_DIR/scripts/sandbox-common-setup.sh" ]]; then
         log_info "Building common sandbox via upstream script..."
-        bash "$MUSTANGCLAW_DIR/scripts/sandbox-common-setup.sh"
+        bash "$OPENCLAW_DIR/scripts/sandbox-common-setup.sh"
     else
         log_warn "Dockerfile.sandbox-common not found — skipping common sandbox."
     fi
@@ -105,13 +105,13 @@ fi
 # ─── Build browser sandbox ──────────────────────────────────────────────────
 if [[ "$BUILD_BROWSER" == "true" ]]; then
     BROWSER_IMAGE="openclaw-sandbox-browser:bookworm-slim"
-    if [[ -f "$MUSTANGCLAW_DIR/Dockerfile.sandbox-browser" ]]; then
+    if [[ -f "$OPENCLAW_DIR/Dockerfile.sandbox-browser" ]]; then
         log_info "Building browser sandbox image: $BROWSER_IMAGE ..."
-        docker build -t "$BROWSER_IMAGE" -f "$MUSTANGCLAW_DIR/Dockerfile.sandbox-browser" "$MUSTANGCLAW_DIR"
+        docker build -t "$BROWSER_IMAGE" -f "$OPENCLAW_DIR/Dockerfile.sandbox-browser" "$OPENCLAW_DIR"
         log_info "Built $BROWSER_IMAGE"
-    elif [[ -f "$MUSTANGCLAW_DIR/scripts/sandbox-browser-setup.sh" ]]; then
+    elif [[ -f "$OPENCLAW_DIR/scripts/sandbox-browser-setup.sh" ]]; then
         log_info "Building browser sandbox via upstream script..."
-        bash "$MUSTANGCLAW_DIR/scripts/sandbox-browser-setup.sh"
+        bash "$OPENCLAW_DIR/scripts/sandbox-browser-setup.sh"
     else
         log_warn "Dockerfile.sandbox-browser not found — skipping browser sandbox."
     fi
@@ -119,7 +119,7 @@ fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""
-log_info "Sandbox images built. To enable sandboxing, add to ~/.mustangclaw/openclaw.json:"
+log_info "Sandbox images built. To enable sandboxing, add to ~/.openclaw/openclaw.json:"
 echo ""
 echo '  "agents": {'
 echo '    "defaults": {'

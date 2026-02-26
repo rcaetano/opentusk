@@ -3,12 +3,12 @@
 # This file is sourced by other scripts; do not execute directly.
 
 # ─── Repository & Image ─────────────────────────────────────────────────────
-MUSTANGCLAW_REPO="https://github.com/openclaw/openclaw.git"
-MUSTANGCLAW_REF=""                                # pinned commit (empty = latest main)
-MUSTANGCLAW_DIR="./openclaw"                      # local clone path (relative to project root)
-MUSTANGCLAW_IMAGE="mustangclaw:local"
-MUSTANGCLAW_CONFIG_DIR="$HOME/.mustangclaw"
-MUSTANGCLAW_WORKSPACE_DIR="$HOME/.mustangclaw/workspace"
+OPENCLAW_REPO="https://github.com/openclaw/openclaw.git"
+OPENCLAW_REF=""                                   # pinned commit (empty = latest main)
+OPENCLAW_DIR="./openclaw"                         # local clone path (relative to project root)
+OPENCLAW_IMAGE="mustangclaw:local"
+OPENCLAW_CONFIG_DIR="$HOME/.openclaw"
+OPENCLAW_WORKSPACE_DIR="$HOME/.openclaw/workspace"
 
 # ─── Docker Ports ────────────────────────────────────────────────────────────
 GATEWAY_PORT=18789
@@ -32,9 +32,15 @@ TAILSCALE_ENABLED=false
 TAILSCALE_AUTH_KEY=""                        # tskey-auth-... from Tailscale admin
 TAILSCALE_MODE="serve"                      # "serve" (tailnet-only) or "funnel" (public)
 
+# ─── Auto-migration: ~/.mustangclaw → ~/.openclaw ──────────────────────────
+if [[ -d "$HOME/.mustangclaw" && ! -d "$HOME/.openclaw" ]]; then
+    mv "$HOME/.mustangclaw" "$HOME/.openclaw"
+    [[ -t 1 ]] && printf '\033[0;32m[INFO]\033[0m Migrated config: ~/.mustangclaw -> ~/.openclaw\n'
+fi
+
 # ─── User Overrides (written by mustangclaw init) ─────────────────────────
-if [[ -f "$MUSTANGCLAW_CONFIG_DIR/config.env" ]]; then
-    source "$MUSTANGCLAW_CONFIG_DIR/config.env"
+if [[ -f "$OPENCLAW_CONFIG_DIR/config.env" ]]; then
+    source "$OPENCLAW_CONFIG_DIR/config.env"
 fi
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
@@ -104,7 +110,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Read the gateway token from openclaw.json.
 # Prints the token (empty string if not found).
 read_json_token() {
-    local json_file="${1:-$MUSTANGCLAW_CONFIG_DIR/openclaw.json}"
+    local json_file="${1:-$OPENCLAW_CONFIG_DIR/openclaw.json}"
     [[ -f "$json_file" ]] || return 0
     python3 -c "
 import json, sys
@@ -118,7 +124,7 @@ except: pass
 # Write the gateway token to openclaw.json (sets auth.mode=token).
 write_json_token() {
     local token="$1"
-    local json_file="${2:-$MUSTANGCLAW_CONFIG_DIR/openclaw.json}"
+    local json_file="${2:-$OPENCLAW_CONFIG_DIR/openclaw.json}"
     [[ -f "$json_file" ]] || return 1
     python3 -c "
 import json, sys
@@ -138,7 +144,7 @@ with open(p, 'w') as f:
 # Patch openclaw.json for Docker compatibility: set bind=lan, remove tailscale.
 # Returns 0 if changes were made, 1 if already correct.
 patch_json_for_docker() {
-    local json_file="${1:-$MUSTANGCLAW_CONFIG_DIR/openclaw.json}"
+    local json_file="${1:-$OPENCLAW_CONFIG_DIR/openclaw.json}"
     [[ -f "$json_file" ]] || return 1
     python3 -c "
 import json, sys
@@ -189,9 +195,9 @@ require_running_gateway() {
 
 # Set COMPOSE_FILES array with the correct docker compose file flags.
 set_compose_files() {
-    COMPOSE_FILES=(-f "$MUSTANGCLAW_DIR/docker-compose.yml")
-    if [[ -f "$MUSTANGCLAW_DIR/docker-compose.override.yml" ]]; then
-        COMPOSE_FILES+=(-f "$MUSTANGCLAW_DIR/docker-compose.override.yml")
+    COMPOSE_FILES=(-f "$OPENCLAW_DIR/docker-compose.yml")
+    if [[ -f "$OPENCLAW_DIR/docker-compose.override.yml" ]]; then
+        COMPOSE_FILES+=(-f "$OPENCLAW_DIR/docker-compose.override.yml")
     fi
 }
 
