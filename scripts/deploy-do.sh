@@ -46,7 +46,6 @@ log_info "Validating prerequisites..."
 
 require_cmd doctl
 require_cmd ssh
-require_cmd rsync
 
 if [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
     log_error "DIGITALOCEAN_ACCESS_TOKEN is not set."
@@ -97,7 +96,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
 Then provision via SSH (as $DO_SSH_USER):
   - Write OpenClaw config (openclaw.json with gateway token)
   - Restart openclaw systemd service
-  - Deploy Poseidon (install bun, rsync source, build, systemd service)
+  - Deploy Poseidon (deploy key, git clone, install bun, build, systemd service)
 EOF
     if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         echo "  - Install Tailscale ($TAILSCALE_MODE mode)"
@@ -145,11 +144,11 @@ log_info "SSH is ready."
 
 # Wait for marketplace first-boot / cloud-init to finish
 # The marketplace image prints "Please wait while we get your droplet ready..."
-# during setup. If we rsync or run commands before it completes, the banner
+# during setup. If we run commands before it completes, the banner
 # text corrupts the protocol stream.
 log_info "Waiting for cloud-init to finish..."
 CLOUD_WAIT=0
-CLOUD_MAX=300
+CLOUD_MAX=600
 while true; do
     CLOUD_STATUS=$(ssh -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" \
         'cloud-init status 2>/dev/null | grep -oE "done|running|error" || echo "unknown"' 2>/dev/null || echo "unknown")
@@ -169,6 +168,25 @@ while true; do
 done
 echo ""
 log_info "Droplet ready (cloud-init: $CLOUD_STATUS, ${CLOUD_WAIT}s)."
+
+# Re-verify SSH after cloud-init (cloud-init may restart sshd)
+log_info "Re-verifying SSH connectivity..."
+SSH_RETRY=0
+SSH_RETRY_MAX=60
+while true; do
+    if ssh -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" "true" 2>/dev/null; then
+        break
+    fi
+    sleep 5
+    SSH_RETRY=$((SSH_RETRY + 5))
+    if [[ $SSH_RETRY -ge $SSH_RETRY_MAX ]]; then
+        log_error "SSH connection lost after cloud-init (waited ${SSH_RETRY_MAX}s)."
+        log_error "The droplet may be rebooting. Try: ssh ${DO_SSH_USER}@${DROPLET_IP}"
+        exit 1
+    fi
+    printf "."
+done
+echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 5: Configure OpenClaw
@@ -217,7 +235,7 @@ CONFIGURE
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 6: Deploy Poseidon
 # ═══════════════════════════════════════════════════════════════════════════════
-if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
+if [[ -n "${POSEIDON_REPO:-}" ]]; then
     log_info "Installing bun on remote..."
     ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<'BUNINSTALL'
 set -euo pipefail
@@ -230,10 +248,73 @@ ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
 echo "bun $(bun --version), pnpm $(pnpm --version)"
 BUNINSTALL
 
-    log_info "Syncing Poseidon source to remote..."
-    rsync -avz --progress -e "ssh" \
-        --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
-        "$PROJECT_ROOT/poseidon/" "${DO_SSH_USER}@${DROPLET_IP}:${REMOTE_POSEIDON_DIR}/"
+    # Generate deploy key on remote (if not already present)
+    log_info "Setting up deploy key on remote..."
+    DEPLOY_PUBKEY=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<'DEPLOYKEY'
+set -euo pipefail
+KEY_FILE="/root/.ssh/poseidon_deploy_key"
+if [[ ! -f "$KEY_FILE" ]]; then
+    ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "mustangclaw-deploy" >/dev/null 2>&1
+fi
+
+# Configure SSH to use this key for github.com
+if ! grep -q "poseidon_deploy_key" /root/.ssh/config 2>/dev/null; then
+    cat >> /root/.ssh/config <<'SSHCONF'
+
+Host github.com
+    IdentityFile /root/.ssh/poseidon_deploy_key
+    StrictHostKeyChecking accept-new
+SSHCONF
+    chmod 600 /root/.ssh/config
+fi
+
+cat "${KEY_FILE}.pub"
+DEPLOYKEY
+    )
+
+    # Add deploy key to GitHub repo via gh CLI (or prompt user)
+    log_info "Adding deploy key to GitHub repo..."
+    # Extract owner/repo from SSH URL (git@github.com:owner/repo.git)
+    REPO_PATH="${POSEIDON_REPO#*:}"
+    REPO_PATH="${REPO_PATH%.git}"
+
+    DEPLOY_KEY_ADDED=false
+    if command -v gh &>/dev/null; then
+        KEY_TITLE="mustangclaw-${DO_DROPLET_NAME}"
+        if gh api "repos/${REPO_PATH}/keys" --method POST \
+            -f title="$KEY_TITLE" -f key="$DEPLOY_PUBKEY" -F read_only=true 2>/dev/null; then
+            log_info "Deploy key added to ${REPO_PATH} via gh CLI."
+            DEPLOY_KEY_ADDED=true
+        else
+            log_warn "gh api failed — key may already exist or token lacks permissions."
+        fi
+    fi
+
+    if [[ "$DEPLOY_KEY_ADDED" != "true" ]]; then
+        echo ""
+        log_warn "Could not add deploy key automatically."
+        echo "  Add this public key as a read-only deploy key at:"
+        echo "  https://github.com/${REPO_PATH}/settings/keys"
+        echo ""
+        echo "  $DEPLOY_PUBKEY"
+        echo ""
+        printf "${_CYAN}Press Enter once the deploy key is added...${_NC} "
+        read -r
+    fi
+
+    log_info "Cloning Poseidon on remote..."
+    ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<GITCLONE
+set -euo pipefail
+if [[ -d "${REMOTE_POSEIDON_DIR}/.git" ]]; then
+    echo "Poseidon repo already cloned — pulling latest..."
+    cd ${REMOTE_POSEIDON_DIR}
+    git fetch origin
+    git reset --hard origin/${POSEIDON_BRANCH}
+else
+    rm -rf ${REMOTE_POSEIDON_DIR}
+    git clone --branch ${POSEIDON_BRANCH} --depth 1 ${POSEIDON_REPO} ${REMOTE_POSEIDON_DIR}
+fi
+GITCLONE
 
     log_info "Building Poseidon on remote..."
     ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<POSEIDON_BUILD
@@ -283,7 +364,7 @@ systemctl start poseidon
 echo "Poseidon service started."
 POSEIDON_SERVICE
 else
-    log_warn "Poseidon source not found at $PROJECT_ROOT/poseidon — skipping Poseidon deploy."
+    log_warn "POSEIDON_REPO not set — skipping Poseidon deploy."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -346,7 +427,7 @@ else
 fi
 
 # Check Poseidon systemd service
-if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
+if [[ -n "${POSEIDON_REPO:-}" ]]; then
     POS_STATUS=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
         'systemctl is-active poseidon 2>/dev/null' || true)
     if [[ "$POS_STATUS" == "active" ]]; then

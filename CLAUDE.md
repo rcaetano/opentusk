@@ -38,6 +38,8 @@ Key variables from `scripts/config.sh`:
 - `DO_SSH_KEY_FINGERPRINT` — auto-detected or set manually
 - `REMOTE_OPENCLAW_HOME` — marketplace user's home on the droplet (`/home/openclaw`)
 - `REMOTE_POSEIDON_DIR` — where Poseidon is deployed on the droplet (`/opt/poseidon`)
+- `POSEIDON_REPO` — Git SSH URL for the Poseidon repo (`git@github.com:rcaetano/poseidon.git`)
+- `POSEIDON_BRANCH` — branch to clone/pull (`main`)
 - `TAILSCALE_ENABLED` — enable Tailscale on deploy (`true`/`false`)
 - `TAILSCALE_AUTH_KEY` — reusable auth key (`tskey-auth-...`) for automated deploy
 - `TAILSCALE_MODE` — `"serve"` (tailnet-only) or `"funnel"` (public internet)
@@ -63,7 +65,7 @@ Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangcla
 ./mustangclaw upgrade --rollback        # revert OpenClaw on remote
 ```
 
-The remote upgrade uses the marketplace updater for OpenClaw and rsyncs Poseidon source from your local machine (private repo that can't be git-cloned on the remote).
+The remote upgrade uses the marketplace updater for OpenClaw and pulls the latest Poseidon source via `git pull` on the remote (using a deploy key set up during the initial deploy).
 
 ### Deployment Notes
 
@@ -71,6 +73,7 @@ The remote upgrade uses the marketplace updater for OpenClaw and rsyncs Poseidon
 - The deploy creates a 2GB swap file to prevent OOM on smaller droplets
 - The recommended droplet size is `s-4vcpu-8gb`; smaller sizes may OOM during builds
 - The gateway takes **~60 seconds** to initialize after starting; smoke tests may show "not responding yet" — this is normal
+- Poseidon is cloned via a deploy key generated on the droplet during first deploy. If `gh` CLI is authenticated locally, the key is added to GitHub automatically; otherwise you'll be prompted to add it manually
 
 ### Tailscale
 

@@ -19,6 +19,10 @@ DO_SSH_USER="root"                            # marketplace convention
 REMOTE_OPENCLAW_HOME="/home/openclaw"         # marketplace user's home
 REMOTE_POSEIDON_DIR="/opt/poseidon"           # where Poseidon is deployed
 
+# ─── Poseidon ─────────────────────────────────────────────────────────────
+POSEIDON_REPO="git@github.com:rcaetano/poseidon.git"
+POSEIDON_BRANCH="main"
+
 # ─── Tailscale (optional) ───────────────────────────────────────────────────
 TAILSCALE_ENABLED=false
 TAILSCALE_AUTH_KEY=""                        # tskey-auth-... from Tailscale admin

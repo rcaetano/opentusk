@@ -9,30 +9,27 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Upgrade MustangClaw by pulling the latest code and rebuilding the Docker image.
-Remote upgrade uses the marketplace updater for OpenClaw and rsyncs Poseidon.
+Upgrade the remote MustangClaw droplet. Uses the marketplace updater for
+OpenClaw and pulls the latest Poseidon source via git on the remote.
 
 Options:
-  --target TARGET   "local" (default) or "remote"
-  --ip IP           Droplet IP for remote target (auto-detected if omitted)
-  --rollback        Revert to previous git commit and rebuild (local only)
+  --ip IP           Droplet IP (auto-detected if omitted)
+  --rollback        Revert OpenClaw to previous version on remote
   --help            Show this help message
 
 Examples:
-  $(basename "$0")                          # upgrade local
-  $(basename "$0") --target remote          # upgrade droplet
-  $(basename "$0") --rollback               # revert local to previous commit
+  $(basename "$0")                  # upgrade remote droplet
+  $(basename "$0") --ip 1.2.3.4    # upgrade specific droplet
+  $(basename "$0") --rollback       # revert OpenClaw on remote
 EOF
     exit 0
 }
 
 # ─── Parse flags ─────────────────────────────────────────────────────────────
-TARGET="local"
 IP=""
 ROLLBACK=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --target)   TARGET="$2"; shift 2 ;;
         --ip)       IP="$2"; shift 2 ;;
         --rollback) ROLLBACK=true; shift ;;
         --help|-h)  usage ;;
@@ -40,73 +37,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$TARGET" != "local" && "$TARGET" != "remote" ]]; then
-    log_error "Invalid target '$TARGET'. Must be 'local' or 'remote'."
-    exit 1
-fi
-
-# ─── Local upgrade ───────────────────────────────────────────────────────────
-if [[ "$TARGET" == "local" ]]; then
-    require_cmd git
-    require_cmd docker
-
-    cd "$PROJECT_ROOT"
-
-    if [[ ! -d "$OPENCLAW_DIR" ]]; then
-        log_error "MustangClaw repo not found at $OPENCLAW_DIR. Run build.sh first."
-        exit 1
-    fi
-
-    OLD_SHA=$(git -C "$OPENCLAW_DIR" rev-parse --short HEAD)
-
-    if [[ "$ROLLBACK" == "true" ]]; then
-        log_warn "Rolling back to previous commit..."
-        git -C "$OPENCLAW_DIR" checkout HEAD~1
-    else
-        log_info "Pulling latest changes..."
-        git -C "$OPENCLAW_DIR" pull
-    fi
-
-    NEW_SHA=$(git -C "$OPENCLAW_DIR" rev-parse --short HEAD)
-
-    log_info "Building Docker image..."
-    docker build -t "$OPENCLAW_IMAGE" "$OPENCLAW_DIR"
-
-    # ─── Update Poseidon ──────────────────────────────────────────────────
-    if [[ -d "$POSEIDON_DIR" ]]; then
-        if [[ -d "$POSEIDON_DIR/.git" ]]; then
-            if [[ "$ROLLBACK" == "true" ]]; then
-                git -C "$POSEIDON_DIR" checkout HEAD~1
-            else
-                log_info "Pulling latest Poseidon changes..."
-                git -C "$POSEIDON_DIR" pull
-            fi
-        else
-            log_info "Poseidon directory is not a git repo (rsynced copy) — skipping pull."
-        fi
-        log_info "Rebuilding Poseidon overlay..."
-        docker build -f "$PROJECT_ROOT/Dockerfile.poseidon" -t "$OPENCLAW_IMAGE" "$PROJECT_ROOT"
-    fi
-
-    # Restart via 'mustangclaw run' to apply config patches (bind=lan, token sync, etc.)
-    log_info "Restarting gateway..."
-    "$PROJECT_ROOT/scripts/run-local.sh" --stop
-    "$PROJECT_ROOT/scripts/run-local.sh"
-
-    log_info "Upgrade complete."
-    log_info "  Previous: $OLD_SHA"
-    log_info "  Current:  $NEW_SHA"
-    exit 0
-fi
-
-# ─── Remote upgrade ─────────────────────────────────────────────────────────
+# ─── Prerequisites ──────────────────────────────────────────────────────────
 require_cmd ssh
-require_cmd rsync
-
-if [[ "$ROLLBACK" == "true" ]]; then
-    log_error "--rollback is only supported for local upgrades."
-    exit 1
-fi
 
 if [[ -z "$IP" ]]; then
     require_cmd doctl "doctl is required to auto-detect droplet IP. Install it or use --ip."
@@ -115,9 +47,21 @@ fi
 
 log_info "Upgrading remote at $IP..."
 
-# 1. Update OpenClaw via marketplace updater
-log_info "Updating OpenClaw on remote..."
-ssh "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+# 1. Update OpenClaw via marketplace updater (or rollback)
+if [[ "$ROLLBACK" == "true" ]]; then
+    log_info "Rolling back OpenClaw on remote..."
+    ssh "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+set -euo pipefail
+if [[ -x /opt/rollback-openclaw.sh ]]; then
+    /opt/rollback-openclaw.sh
+else
+    echo "Marketplace rollback script not found — skipping OpenClaw rollback."
+fi
+systemctl restart openclaw
+OCUPDATE
+else
+    log_info "Updating OpenClaw on remote..."
+    ssh "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
 set -euo pipefail
 if [[ -x /opt/update-openclaw.sh ]]; then
     /opt/update-openclaw.sh
@@ -126,13 +70,17 @@ else
 fi
 systemctl restart openclaw
 OCUPDATE
+fi
 
-# 2. Rsync Poseidon source (private repo — can't git clone on remote)
-if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
-    log_info "Syncing Poseidon source to remote..."
-    rsync -avz --progress -e "ssh" \
-        --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
-        "$PROJECT_ROOT/poseidon/" "${DO_SSH_USER}@${IP}:${REMOTE_POSEIDON_DIR}/"
+# 2. Pull latest Poseidon source via git on the remote
+if [[ -n "${POSEIDON_REPO:-}" ]]; then
+    log_info "Pulling latest Poseidon on remote..."
+    ssh "${DO_SSH_USER}@${IP}" bash <<POSPULL
+set -euo pipefail
+cd ${REMOTE_POSEIDON_DIR}
+git fetch origin
+git reset --hard origin/${POSEIDON_BRANCH}
+POSPULL
 
     # 3. Rebuild Poseidon + restart
     log_info "Rebuilding Poseidon on remote..."
@@ -145,7 +93,44 @@ chown -R openclaw:openclaw ${REMOTE_POSEIDON_DIR}
 systemctl restart poseidon
 POSBUILD
 else
-    log_warn "Poseidon source not found locally — skipping Poseidon upgrade."
+    log_warn "POSEIDON_REPO not set — skipping Poseidon upgrade."
+fi
+
+# 4. Verify Tailscale serve (re-apply if missing)
+if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
+    log_info "Verifying Tailscale serve configuration..."
+    SERVE_OK=$(ssh "${DO_SSH_USER}@${IP}" bash <<TSCHECK
+if ! command -v tailscale &>/dev/null; then
+    echo "not_installed"
+elif ! tailscale serve status 2>&1 | grep -q "localhost:${POSEIDON_PORT}"; then
+    echo "missing_poseidon"
+elif ! tailscale serve status 2>&1 | grep -q "localhost:${GATEWAY_PORT}"; then
+    echo "missing_gateway"
+else
+    echo "ok"
+fi
+TSCHECK
+    )
+    if [[ "$SERVE_OK" == "not_installed" ]]; then
+        log_warn "Tailscale binary not installed on remote — skipping serve verification."
+        log_warn "Install with: ssh ${DO_SSH_USER}@${IP} 'curl -fsSL https://tailscale.com/install.sh | sh && tailscale up'"
+    elif [[ "$SERVE_OK" != "ok" ]]; then
+        log_warn "Tailscale serve incomplete ($SERVE_OK) — re-applying..."
+        if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
+            ssh "${DO_SSH_USER}@${IP}" bash <<TSFUNNEL
+tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
+tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
+TSFUNNEL
+        else
+            ssh "${DO_SSH_USER}@${IP}" bash <<TSSERVE
+tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
+tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
+TSSERVE
+        fi
+        log_info "Tailscale serve re-applied."
+    else
+        log_info "Tailscale serve OK."
+    fi
 fi
 
 log_info "Remote upgrade complete at $IP."
