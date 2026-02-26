@@ -9,28 +9,23 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Full sanity check of the MustangClaw setup: config, scripts, Docker image,
-container internals, repos, local connectivity, and remote droplet health.
+Sanity check of the MustangClaw setup: config, scripts, and remote droplet.
 
 Options:
-  --fix       Attempt to auto-fix common issues (restart, patch config)
-  --remote    Include remote droplet checks (requires SSH access)
+  --fix       Attempt to auto-fix common issues
   --help      Show this help message
 
 Examples:
-  $(basename "$0")              # audit local setup only
-  $(basename "$0") --remote     # include remote droplet checks
-  $(basename "$0") --fix        # audit and fix issues
+  $(basename "$0")          # audit setup and remote droplet
+  $(basename "$0") --fix    # audit and fix issues
 EOF
     exit 0
 }
 
 # ─── Parse flags ─────────────────────────────────────────────────────────────
-CHECK_REMOTE=false
 AUTO_FIX=false
 for arg in "$@"; do
     case "$arg" in
-        --remote)  CHECK_REMOTE=true ;;
         --fix)     AUTO_FIX=true ;;
         --help|-h) usage ;;
         *) log_error "Unknown option: $arg"; usage ;;
@@ -52,98 +47,31 @@ fixed() { printf "${_GREEN}  [FIXED]${_NC} %s\n" "$*"; FIXED=$((FIXED + 1)); }
 cd "$PROJECT_ROOT"
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 1. Configuration files
+# 1. Configuration
 # ═════════════════════════════════════════════════════════════════════════════
 printf "\n${_CYAN}── 1. Configuration ──${_NC}\n"
 
-if [[ -d "$OPENCLAW_CONFIG_DIR" ]]; then
-    pass "Config directory exists: $OPENCLAW_CONFIG_DIR"
-else
-    fail "Config directory missing: $OPENCLAW_CONFIG_DIR"
-fi
-
-if [[ -f "$OPENCLAW_CONFIG_DIR/config.env" ]]; then
+if [[ -f "$PROJECT_ROOT/config.env" ]]; then
     pass "config.env exists"
     # Check key variables
-    source "$OPENCLAW_CONFIG_DIR/config.env" 2>/dev/null || true
-    if [[ -n "${GATEWAY_PORT:-}" ]]; then
-        pass "GATEWAY_PORT=${GATEWAY_PORT}"
+    source "$PROJECT_ROOT/config.env" 2>/dev/null || true
+    if [[ -n "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
+        pass "DIGITALOCEAN_ACCESS_TOKEN is set"
     else
-        warn "GATEWAY_PORT not set in config.env"
+        warn "DIGITALOCEAN_ACCESS_TOKEN not set in config.env"
     fi
-    if [[ -n "${POSEIDON_PORT:-}" ]]; then
-        pass "POSEIDON_PORT=${POSEIDON_PORT}"
+    if [[ -n "${DO_DROPLET_NAME:-}" ]]; then
+        pass "DO_DROPLET_NAME=${DO_DROPLET_NAME}"
     else
-        warn "POSEIDON_PORT not set in config.env"
+        warn "DO_DROPLET_NAME not set in config.env"
+    fi
+    if [[ -n "${POSEIDON_REPO:-}" ]]; then
+        pass "POSEIDON_REPO=${POSEIDON_REPO}"
+    else
+        warn "POSEIDON_REPO not set in config.env — Poseidon deploy will be skipped"
     fi
 else
     fail "config.env missing — run 'mustangclaw init'"
-fi
-
-OPENCLAW_JSON="$OPENCLAW_CONFIG_DIR/openclaw.json"
-if [[ -f "$OPENCLAW_JSON" ]]; then
-    pass "openclaw.json exists"
-    # Validate JSON
-    if python3 -c "import json; json.load(open('$OPENCLAW_JSON'))" 2>/dev/null; then
-        pass "openclaw.json is valid JSON"
-    else
-        fail "openclaw.json is not valid JSON"
-    fi
-    # Check gateway token
-    local_token=$(read_json_token "$OPENCLAW_JSON")
-    if [[ -n "$local_token" ]]; then
-        pass "Gateway token present in openclaw.json (${local_token:0:8}...)"
-    else
-        warn "No gateway token in openclaw.json"
-    fi
-    # Check bind=lan
-    bind_val=$(python3 -c "import json; print(json.load(open('$OPENCLAW_JSON')).get('gateway',{}).get('bind',''))" 2>/dev/null || true)
-    if [[ "$bind_val" == "lan" ]]; then
-        pass "gateway.bind=lan (Docker-compatible)"
-    else
-        warn "gateway.bind=$bind_val (expected 'lan' for Docker)"
-        if [[ "$AUTO_FIX" == "true" ]]; then
-            patch_json_for_docker "$OPENCLAW_JSON" && fixed "Patched gateway.bind=lan" || true
-        fi
-    fi
-else
-    fail "openclaw.json missing — run 'mustangclaw run' or 'mustangclaw setup'"
-fi
-
-# Check .env token alignment
-ENV_FILE="$OPENCLAW_DIR/.env"
-if [[ -f "$ENV_FILE" ]]; then
-    env_token=$(grep '^OPENCLAW_GATEWAY_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
-    if [[ -n "$local_token" && -n "$env_token" ]]; then
-        if [[ "$local_token" == "$env_token" ]]; then
-            pass "Token aligned between openclaw.json and .env"
-        else
-            fail "Token mismatch: openclaw.json vs .env"
-            if [[ "$AUTO_FIX" == "true" ]]; then
-                # Trust openclaw.json as source of truth
-                tmpfile=$(mktemp)
-                awk -v tok="$local_token" \
-                    '/^OPENCLAW_GATEWAY_TOKEN=/{$0="OPENCLAW_GATEWAY_TOKEN="tok}{print}' \
-                    "$ENV_FILE" > "$tmpfile" && mv "$tmpfile" "$ENV_FILE"
-                fixed "Synced .env token from openclaw.json"
-            fi
-        fi
-    fi
-    # Check for POSEIDON_PORT duplication
-    dup_count=$(grep -c '^POSEIDON_PORT=' "$ENV_FILE" 2>/dev/null || echo "0")
-    if [[ "$dup_count" -gt 1 ]]; then
-        fail "POSEIDON_PORT duplicated ${dup_count}x in .env"
-        if [[ "$AUTO_FIX" == "true" ]]; then
-            # Remove all POSEIDON_PORT lines, will be regenerated on next run
-            tmpfile=$(mktemp)
-            grep -v '^POSEIDON_PORT=' "$ENV_FILE" > "$tmpfile" || true
-            echo "POSEIDON_PORT=$POSEIDON_PORT" >> "$tmpfile"
-            mv "$tmpfile" "$ENV_FILE"
-            fixed "Deduplicated POSEIDON_PORT in .env"
-        fi
-    elif [[ "$dup_count" -eq 1 ]]; then
-        pass "POSEIDON_PORT appears once in .env"
-    fi
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -152,9 +80,8 @@ fi
 printf "\n${_CYAN}── 2. Scripts ──${_NC}\n"
 
 REQUIRED_SCRIPTS=(
-    config.sh build.sh run-local.sh docker-entrypoint.sh init.sh
-    deploy-do.sh destroy-do.sh sync-config.sh upgrade.sh ssh-do.sh
-    save.sh load.sh sandbox-build.sh rotate-tokens.sh
+    config.sh init.sh
+    deploy-do.sh destroy-do.sh upgrade.sh ssh-do.sh
 )
 scripts_ok=true
 for script in "${REQUIRED_SCRIPTS[@]}"; do
@@ -188,248 +115,220 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 3. Repositories
+# 3. Remote Droplet
 # ═════════════════════════════════════════════════════════════════════════════
-printf "\n${_CYAN}── 3. Repositories ──${_NC}\n"
+printf "\n${_CYAN}── 3. Remote Droplet ──${_NC}\n"
 
-if [[ -d "$OPENCLAW_DIR/.git" ]]; then
-    pass "OpenClaw repo exists at $OPENCLAW_DIR"
-    oc_branch=$(git -C "$OPENCLAW_DIR" branch --show-current 2>/dev/null || echo "detached")
-    pass "OpenClaw branch: $oc_branch"
-    if git -C "$OPENCLAW_DIR" fetch --dry-run 2>/dev/null; then
-        behind=$(git -C "$OPENCLAW_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
-        if [[ "$behind" == "0" ]]; then
-            pass "OpenClaw up to date with upstream"
-        elif [[ "$behind" != "?" ]]; then
-            warn "OpenClaw is $behind commit(s) behind upstream"
-        fi
-    fi
+if ! command -v doctl &>/dev/null; then
+    warn "doctl not installed — skipping remote checks"
+elif [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
+    warn "DIGITALOCEAN_ACCESS_TOKEN not set — skipping remote checks"
 else
-    fail "OpenClaw repo missing — run 'mustangclaw build'"
-fi
+    DROPLET_IP=$(get_droplet_ip 2>/dev/null || true)
+    if [[ -z "$DROPLET_IP" ]]; then
+        warn "No droplet found with tag '$DO_TAG'"
+    else
+        pass "Droplet '$DO_DROPLET_NAME' at $DROPLET_IP"
 
-if [[ -d "$POSEIDON_DIR" ]]; then
-    pass "Poseidon repo exists at $POSEIDON_DIR"
-    if [[ -d "$POSEIDON_DIR/.git" ]]; then
-        pos_branch=$(git -C "$POSEIDON_DIR" branch --show-current 2>/dev/null || echo "detached")
-        pass "Poseidon branch: $pos_branch"
-        if git -C "$POSEIDON_DIR" fetch --dry-run 2>/dev/null; then
-            behind=$(git -C "$POSEIDON_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
-            if [[ "$behind" == "0" ]]; then
-                pass "Poseidon up to date with upstream"
-            elif [[ "$behind" != "?" ]]; then
-                warn "Poseidon is $behind commit(s) behind upstream"
+        # SSH connectivity
+        if ssh -o ConnectTimeout=5 -o BatchMode=yes "${DO_SSH_USER}@${DROPLET_IP}" true 2>/dev/null; then
+            pass "SSH access OK (${DO_SSH_USER}@${DROPLET_IP})"
+
+            # OpenClaw systemd service
+            oc_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                'systemctl is-active openclaw 2>/dev/null' 2>/dev/null || true)
+            if [[ "$oc_status" == "active" ]]; then
+                pass "OpenClaw service: active"
+            else
+                fail "OpenClaw service: $oc_status"
+                if [[ "$AUTO_FIX" == "true" ]]; then
+                    ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                        'systemctl restart openclaw && sleep 3 && systemctl is-active openclaw' 2>/dev/null \
+                        && fixed "Restarted OpenClaw service" \
+                        || fail "Could not restart OpenClaw service"
+                fi
             fi
-        fi
-    else
-        warn "Poseidon directory is not a git repo (rsynced copy)"
-    fi
-else
-    fail "Poseidon repo missing — run 'mustangclaw build'"
-fi
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 4. Docker image
-# ═════════════════════════════════════════════════════════════════════════════
-printf "\n${_CYAN}── 4. Docker Image ──${_NC}\n"
+            # Poseidon systemd service
+            pos_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                'systemctl is-active poseidon 2>/dev/null' 2>/dev/null || true)
+            if [[ "$pos_status" == "active" ]]; then
+                pass "Poseidon service: active"
+            else
+                fail "Poseidon service: $pos_status"
+                if [[ "$AUTO_FIX" == "true" ]]; then
+                    ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                        'systemctl restart poseidon && sleep 2 && systemctl is-active poseidon' 2>/dev/null \
+                        && fixed "Restarted Poseidon service" \
+                        || fail "Could not restart Poseidon service"
+                fi
+            fi
 
-if ! command -v docker &>/dev/null; then
-    fail "Docker not installed"
-else
-    pass "Docker installed"
-    image_info=$(docker images "$OPENCLAW_IMAGE" --format '{{.Size}} (created {{.CreatedSince}})' 2>/dev/null | head -1)
-    if [[ -n "$image_info" ]]; then
-        pass "Image $OPENCLAW_IMAGE exists: $image_info"
-        # Check if Poseidon is bundled
-        has_poseidon=$(docker run --rm --entrypoint sh "$OPENCLAW_IMAGE" -c 'test -d /poseidon && echo yes || echo no' 2>/dev/null || echo "error")
-        if [[ "$has_poseidon" == "yes" ]]; then
-            pass "Poseidon bundled in image (/poseidon exists)"
-        else
-            fail "Poseidon NOT bundled in image — rebuild with 'mustangclaw build'"
-        fi
-        has_bun=$(docker run --rm --entrypoint sh "$OPENCLAW_IMAGE" -c 'which bun >/dev/null 2>&1 && echo yes || echo no' 2>/dev/null || echo "error")
-        if [[ "$has_bun" == "yes" ]]; then
-            pass "bun binary present in image"
-        else
-            fail "bun missing from image — rebuild with 'mustangclaw build'"
-        fi
-    else
-        fail "Image $OPENCLAW_IMAGE not found — run 'mustangclaw build'"
-    fi
-fi
+            # Poseidon GATEWAY_URL protocol check
+            remote_gw_url=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                'grep "^GATEWAY_URL=" /opt/poseidon.env 2>/dev/null | cut -d= -f2-' 2>/dev/null || true)
+            if [[ "$remote_gw_url" == ws://* ]]; then
+                pass "Poseidon GATEWAY_URL uses ws:// protocol"
+            elif [[ -n "$remote_gw_url" ]]; then
+                fail "Poseidon GATEWAY_URL=$remote_gw_url (should be ws://)"
+                if [[ "$AUTO_FIX" == "true" ]]; then
+                    ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                        "sed -i 's|^GATEWAY_URL=http://|GATEWAY_URL=ws://|' /opt/poseidon.env && systemctl restart poseidon" 2>/dev/null \
+                        && fixed "Fixed GATEWAY_URL protocol to ws:// and restarted Poseidon" \
+                        || fail "Could not fix GATEWAY_URL"
+                fi
+            fi
 
-# ═════════════════════════════════════════════════════════════════════════════
-# 5. Local container
-# ═════════════════════════════════════════════════════════════════════════════
-printf "\n${_CYAN}── 5. Local Container ──${_NC}\n"
+            # Gateway HTTP check
+            if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
+                pass "Remote gateway responding on port ${GATEWAY_PORT}"
+            else
+                fail "Remote gateway not responding"
+            fi
 
-gw_container=$(get_running_gateway)
-if [[ -n "$gw_container" ]]; then
-    pass "Gateway container running: $gw_container"
+            # Poseidon HTTP check
+            if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${POSEIDON_PORT}" 2>/dev/null; then
+                pass "Remote Poseidon responding on port ${POSEIDON_PORT}"
+            else
+                fail "Remote Poseidon not responding"
+            fi
 
-    # Check HOME and config path
-    container_home=$(docker exec "$gw_container" sh -c 'echo $HOME' 2>/dev/null || true)
-    if [[ "$container_home" == "/home/node" ]]; then
-        pass "Container HOME=/home/node"
-    else
-        fail "Container HOME=$container_home (expected /home/node)"
-    fi
-
-    has_config=$(docker exec "$gw_container" sh -c 'test -f /home/node/.openclaw/openclaw.json && echo yes || echo no' 2>/dev/null || true)
-    if [[ "$has_config" == "yes" ]]; then
-        pass "openclaw.json mounted at /home/node/.openclaw/"
-    else
-        fail "openclaw.json NOT found at /home/node/.openclaw/"
-    fi
-
-    has_workspace=$(docker exec "$gw_container" sh -c 'test -d /home/node/.openclaw/workspace && echo yes || echo no' 2>/dev/null || true)
-    if [[ "$has_workspace" == "yes" ]]; then
-        pass "Workspace mounted at /home/node/.openclaw/workspace"
-    else
-        warn "Workspace directory missing inside container"
-    fi
-
-    # Check Poseidon process
-    poseidon_proc=$(docker exec "$gw_container" sh -c 'pgrep -f "bun.*poseidon" >/dev/null 2>&1 && echo yes || echo no' 2>/dev/null || true)
-    if [[ "$poseidon_proc" == "yes" ]]; then
-        pass "Poseidon process running (bun)"
-    else
-        warn "Poseidon process not running inside container"
-    fi
-
-    # Check gateway process
-    gw_proc=$(docker exec "$gw_container" sh -c 'pgrep -f "openclaw-gateway" >/dev/null 2>&1 && echo yes || echo no' 2>/dev/null || true)
-    if [[ "$gw_proc" == "yes" ]]; then
-        pass "Gateway process running"
-    else
-        fail "Gateway process not running inside container"
-    fi
-
-    # HTTP checks
-    if curl -sf -o /dev/null --max-time 5 "http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
-        pass "Gateway responding on http://localhost:${GATEWAY_PORT}"
-    else
-        fail "Gateway not responding on port ${GATEWAY_PORT}"
-    fi
-
-    if curl -sf -o /dev/null --max-time 5 "http://localhost:${POSEIDON_PORT}" 2>/dev/null; then
-        pass "Poseidon responding on http://localhost:${POSEIDON_PORT}"
-    else
-        fail "Poseidon not responding on port ${POSEIDON_PORT}"
-    fi
-else
-    warn "Gateway container not running"
-    skip "Container internal checks (container not running)"
-    skip "HTTP connectivity checks (container not running)"
-fi
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 6. Remote droplet (optional)
-# ═════════════════════════════════════════════════════════════════════════════
-if [[ "$CHECK_REMOTE" == "true" ]]; then
-    printf "\n${_CYAN}── 6. Remote Droplet ──${_NC}\n"
-
-    if ! command -v doctl &>/dev/null; then
-        warn "doctl not installed — skipping remote checks"
-    elif [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
-        warn "DIGITALOCEAN_ACCESS_TOKEN not set — skipping remote checks"
-    else
-        DROPLET_IP=$(get_droplet_ip 2>/dev/null || true)
-        if [[ -z "$DROPLET_IP" ]]; then
-            warn "No droplet found with tag '$DO_TAG'"
-        else
-            pass "Droplet '$DO_DROPLET_NAME' at $DROPLET_IP"
-
-            # SSH connectivity
-            if ssh -o ConnectTimeout=5 -o BatchMode=yes "${DO_SSH_USER}@${DROPLET_IP}" true 2>/dev/null; then
-                pass "SSH access OK (${DO_SSH_USER}@${DROPLET_IP})"
-
-                # OpenClaw systemd service
-                oc_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
-                    'systemctl is-active openclaw 2>/dev/null' 2>/dev/null || true)
-                if [[ "$oc_status" == "active" ]]; then
-                    pass "OpenClaw service: active"
+            # Poseidon deploy key
+            if [[ -n "${POSEIDON_REPO:-}" ]]; then
+                deploy_key_exists=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                    '[[ -f /root/.ssh/poseidon_deploy_key ]] && echo yes || echo no' 2>/dev/null || echo "no")
+                if [[ "$deploy_key_exists" == "yes" ]]; then
+                    pass "Deploy key exists on remote"
                 else
-                    fail "OpenClaw service: $oc_status"
+                    fail "Deploy key missing (/root/.ssh/poseidon_deploy_key)"
+                    if [[ "$AUTO_FIX" == "true" ]]; then
+                        ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                            'ssh-keygen -t ed25519 -f /root/.ssh/poseidon_deploy_key -N "" -C "mustangclaw-deploy" >/dev/null 2>&1' 2>/dev/null \
+                            && fixed "Generated deploy key on remote" \
+                            || fail "Could not generate deploy key"
+                        log_warn "Deploy key created but must be added to GitHub as a deploy key."
+                        log_warn "Public key: $(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'cat /root/.ssh/poseidon_deploy_key.pub' 2>/dev/null)"
+                    fi
                 fi
 
-                # Poseidon systemd service
-                pos_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
-                    'systemctl is-active poseidon 2>/dev/null' 2>/dev/null || true)
-                if [[ "$pos_status" == "active" ]]; then
-                    pass "Poseidon service: active"
+                ssh_config_ok=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                    'grep -q "poseidon_deploy_key" /root/.ssh/config 2>/dev/null && echo yes || echo no' 2>/dev/null || echo "no")
+                if [[ "$ssh_config_ok" == "yes" ]]; then
+                    pass "SSH config references deploy key for github.com"
                 else
-                    fail "Poseidon service: $pos_status"
+                    fail "SSH config missing deploy key entry for github.com"
+                    if [[ "$AUTO_FIX" == "true" ]]; then
+                        ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<'FIXSSHCONF'
+cat >> /root/.ssh/config <<'SSHCONF'
+
+Host github.com
+    IdentityFile /root/.ssh/poseidon_deploy_key
+    StrictHostKeyChecking accept-new
+SSHCONF
+chmod 600 /root/.ssh/config
+FIXSSHCONF
+                        fixed "Added github.com deploy key entry to SSH config"
+                    fi
                 fi
 
-                # Gateway HTTP check
-                if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
-                    pass "Remote gateway responding on port ${GATEWAY_PORT}"
-                else
-                    fail "Remote gateway not responding"
-                fi
+                # Poseidon git repo
+                pos_is_git=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                    "[[ -d ${REMOTE_POSEIDON_DIR}/.git ]] && echo yes || echo no" 2>/dev/null || echo "no")
+                if [[ "$pos_is_git" == "yes" ]]; then
+                    pass "Poseidon directory is a git repo"
 
-                # Poseidon HTTP check
-                if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${POSEIDON_PORT}" 2>/dev/null; then
-                    pass "Remote Poseidon responding on port ${POSEIDON_PORT}"
-                else
-                    fail "Remote Poseidon not responding"
-                fi
-
-                # Tailscale
-                if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
-                    ts_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale status --self --json 2>/dev/null' 2>/dev/null || true)
-                    if [[ -n "$ts_status" ]]; then
-                        ts_name=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').split('.')[0])" 2>/dev/null || true)
-                        ts_online=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('Online',False))" 2>/dev/null || true)
-                        if [[ "$ts_online" == "True" ]]; then
-                            pass "Tailscale online (hostname: $ts_name)"
-                        else
-                            fail "Tailscale not online"
+                    # Check remote URL matches POSEIDON_REPO
+                    pos_remote=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                        "git -C ${REMOTE_POSEIDON_DIR} remote get-url origin 2>/dev/null" 2>/dev/null || true)
+                    if [[ "$pos_remote" == "$POSEIDON_REPO" ]]; then
+                        pass "Poseidon git remote matches POSEIDON_REPO"
+                    elif [[ -n "$pos_remote" ]]; then
+                        fail "Poseidon git remote=$pos_remote (expected $POSEIDON_REPO)"
+                        if [[ "$AUTO_FIX" == "true" ]]; then
+                            ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                                "git -C ${REMOTE_POSEIDON_DIR} remote set-url origin '${POSEIDON_REPO}'" 2>/dev/null \
+                                && fixed "Updated Poseidon git remote to ${POSEIDON_REPO}" \
+                                || fail "Could not update Poseidon git remote"
                         fi
-
-                        # Serve config
-                        serve_out=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale serve status 2>&1' 2>/dev/null || true)
-                        if echo "$serve_out" | grep -q "localhost:${POSEIDON_PORT}" 2>/dev/null; then
-                            pass "Tailscale serve: Poseidon on HTTPS 443"
-                        else
-                            fail "Tailscale serve not configured for Poseidon"
-                        fi
-                        if echo "$serve_out" | grep -q "localhost:${GATEWAY_PORT}" 2>/dev/null; then
-                            pass "Tailscale serve: Gateway on HTTPS 8443"
-                        else
-                            fail "Tailscale serve not configured for Gateway"
-                        fi
-
-                        # End-to-end HTTPS check
-                        ts_fqdn=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || true)
-                        if [[ -n "$ts_fqdn" ]]; then
-                            if curl -sf -o /dev/null --max-time 10 "https://${ts_fqdn}" 2>/dev/null; then
-                                pass "Poseidon reachable via https://${ts_fqdn}"
-                            else
-                                warn "Cannot reach Poseidon via https://${ts_fqdn} (are you on the tailnet?)"
-                            fi
-                            if curl -sf -o /dev/null --max-time 10 "https://${ts_fqdn}:8443" 2>/dev/null; then
-                                pass "Gateway reachable via https://${ts_fqdn}:8443"
-                            else
-                                warn "Cannot reach Gateway via https://${ts_fqdn}:8443 (are you on the tailnet?)"
-                            fi
-                        fi
-                    else
-                        fail "Cannot read Tailscale status"
                     fi
                 else
-                    skip "Tailscale checks (TAILSCALE_ENABLED=false)"
+                    fail "Poseidon directory is not a git repo (${REMOTE_POSEIDON_DIR}/.git missing)"
+                fi
+            fi
+
+            # Tailscale
+            if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
+                ts_installed=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'command -v tailscale &>/dev/null && echo yes || echo no' 2>/dev/null || echo "no")
+                if [[ "$ts_installed" != "yes" ]]; then
+                    fail "Tailscale binary not installed on remote"
+                    if [[ "$AUTO_FIX" == "true" ]]; then
+                        ssh "${DO_SSH_USER}@${DROPLET_IP}" 'curl -fsSL https://tailscale.com/install.sh | sh' 2>/dev/null \
+                            && fixed "Installed Tailscale on remote" \
+                            || fail "Could not install Tailscale on remote"
+                        log_warn "Tailscale installed but needs manual auth: ssh ${DO_SSH_USER}@${DROPLET_IP} 'tailscale up'"
+                    fi
+                fi
+
+                ts_status=$( [[ "$ts_installed" == "yes" ]] && ssh "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale status --self --json 2>/dev/null' 2>/dev/null || true)
+                if [[ -n "$ts_status" ]]; then
+                    ts_name=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').split('.')[0])" 2>/dev/null || true)
+                    ts_online=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('Online',False))" 2>/dev/null || true)
+                    if [[ "$ts_online" == "True" ]]; then
+                        pass "Tailscale online (hostname: $ts_name)"
+                    else
+                        fail "Tailscale not online"
+                    fi
+
+                    # Serve config
+                    serve_out=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale serve status 2>&1' 2>/dev/null || true)
+                    if echo "$serve_out" | grep -q "localhost:${POSEIDON_PORT}" 2>/dev/null; then
+                        pass "Tailscale serve: Poseidon on HTTPS 443"
+                    else
+                        fail "Tailscale serve not configured for Poseidon"
+                        if [[ "$AUTO_FIX" == "true" ]]; then
+                            ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                                "tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}" 2>/dev/null \
+                                && fixed "Re-applied Tailscale serve for Poseidon (HTTPS 443)" \
+                                || fail "Could not re-apply Tailscale serve for Poseidon"
+                        fi
+                    fi
+                    if echo "$serve_out" | grep -q "localhost:${GATEWAY_PORT}" 2>/dev/null; then
+                        pass "Tailscale serve: Gateway on HTTPS 8443"
+                    else
+                        fail "Tailscale serve not configured for Gateway"
+                        if [[ "$AUTO_FIX" == "true" ]]; then
+                            ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                                "tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}" 2>/dev/null \
+                                && fixed "Re-applied Tailscale serve for Gateway (HTTPS 8443)" \
+                                || fail "Could not re-apply Tailscale serve for Gateway"
+                        fi
+                    fi
+
+                    # End-to-end HTTPS check
+                    ts_fqdn=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || true)
+                    if [[ -n "$ts_fqdn" ]]; then
+                        if curl -sf -o /dev/null --max-time 10 "https://${ts_fqdn}" 2>/dev/null; then
+                            pass "Poseidon reachable via https://${ts_fqdn}"
+                        else
+                            warn "Cannot reach Poseidon via https://${ts_fqdn} (are you on the tailnet?)"
+                        fi
+                        if curl -sf -o /dev/null --max-time 10 "https://${ts_fqdn}:8443" 2>/dev/null; then
+                            pass "Gateway reachable via https://${ts_fqdn}:8443"
+                        else
+                            warn "Cannot reach Gateway via https://${ts_fqdn}:8443 (are you on the tailnet?)"
+                        fi
+                    fi
+                elif [[ "$ts_installed" == "yes" ]]; then
+                    fail "Cannot read Tailscale status"
                 fi
             else
-                fail "Cannot SSH to ${DO_SSH_USER}@${DROPLET_IP}"
-                skip "Remote service and connectivity checks"
+                skip "Tailscale checks (TAILSCALE_ENABLED=false)"
             fi
+        else
+            fail "Cannot SSH to ${DO_SSH_USER}@${DROPLET_IP}"
+            skip "Remote service and connectivity checks"
         fi
     fi
-else
-    printf "\n${_CYAN}── 6. Remote Droplet ──${_NC}\n"
-    skip "Remote checks (use --remote to include)"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
