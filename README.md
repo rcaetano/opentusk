@@ -7,6 +7,7 @@ DigitalOcean deployment tool for [OpenClaw](https://github.com/openclaw/openclaw
 - `doctl` CLI (DigitalOcean)
 - `ssh` and `rsync`
 - `python3` (for Tailscale status parsing)
+- A [Poseidon](https://github.com/rcaetano/poseidon) Git repo accessible via SSH deploy key (configured during `opentusk deploy`)
 
 ## Getting Started
 
@@ -37,7 +38,7 @@ Run `opentusk <command> --help` for detailed usage of any command.
 ./opentusk upgrade --rollback        # revert OpenClaw on remote
 ```
 
-The remote upgrade uses the marketplace updater for OpenClaw and rsyncs Poseidon source from your local machine (private repo).
+The remote upgrade uses the marketplace updater for OpenClaw and pulls the latest Poseidon source via `git pull` on the remote (using a deploy key set up during initial deploy).
 
 ## Audit
 
@@ -57,7 +58,7 @@ Requires a Tailscale auth key (`tskey-auth-...`) from the [Tailscale admin conso
 
 ## Configuration
 
-**`config.env`** — Written by `opentusk init` in the project root. Controls DigitalOcean settings and Tailscale configuration. Git-ignored (contains secrets).
+**`config.env`** — Written by `opentusk init` in the project root. Controls DigitalOcean settings and Tailscale configuration. Git-ignored (contains secrets). See [`config.env.example`](config.env.example) for a template.
 
 Key variables:
 
@@ -68,6 +69,12 @@ Key variables:
 | `DO_REGION` | DO region | `fra1` |
 | `DO_SIZE` | Droplet size | `s-2vcpu-4gb` |
 | `DO_SSH_KEY_FINGERPRINT` | SSH key (blank = auto-detect) | — |
+| `POSEIDON_REPO` | Git SSH URL for Poseidon repo | — |
+| `POSEIDON_BRANCH` | Branch to clone/pull | `main` |
 | `TAILSCALE_ENABLED` | Enable Tailscale on deploy | `false` |
 | `TAILSCALE_AUTH_KEY` | Reusable auth key | — |
 | `TAILSCALE_MODE` | `serve` (tailnet) or `funnel` (public) | `serve` |
+
+## License
+
+[MIT](LICENSE)
