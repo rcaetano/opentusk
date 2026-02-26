@@ -70,10 +70,13 @@ The remote upgrade uses the marketplace updater for OpenClaw and pulls the lates
 ### Deployment Notes
 
 - The `openclaw` DO marketplace image is pre-configured with OpenClaw and systemd services
+- **Deploy is resumable** — if it fails partway through, re-running `./mustangclaw deploy` detects the existing droplet and picks up where it left off (skips creation, recovers the gateway token from the remote, restarts services idempotently, skips Tailscale auth/serve if already configured)
+- On first deploy, the marketplace image has an interactive AI provider selector; the script detects this and prompts you to complete it via `./mustangclaw ssh` in another terminal before continuing
 - The deploy creates a 2GB swap file to prevent OOM on smaller droplets
 - The recommended droplet size is `s-4vcpu-8gb`; smaller sizes may OOM during builds
 - The gateway takes **~60 seconds** to initialize after starting; smoke tests may show "not responding yet" — this is normal
 - Poseidon is cloned via a deploy key generated on the droplet during first deploy. If `gh` CLI is authenticated locally, the key is added to GitHub automatically; otherwise you'll be prompted to add it manually
+- Credentials (`~/.openclaw/remote-credentials`) are written immediately after token resolution, before Poseidon/Tailscale phases — so they persist even if a later phase fails
 
 ### Tailscale
 
@@ -98,4 +101,5 @@ tailscale serve --bg --https=8443 http://localhost:18789 # Gateway
 - **Poseidon unreachable over Tailscale**: Check `tailscale serve status` on the droplet. If empty, reconfigure: `tailscale serve --bg --https=443 http://localhost:18791`
 - **Tailscale hostname has "-1" suffix**: Another device with the same name exists on your tailnet. Remove the old device from Tailscale admin or use the suffixed name
 - **Tailscale serve still uses old hostname after rename**: Run `tailscale serve reset` on the droplet, then reconfigure serve entries
+- **Deploy fails with "Connection refused" after cloud-init**: The marketplace image's first-login AI provider selector can interfere with scripted SSH. Re-run `./mustangclaw deploy` — it will detect the pending setup and prompt you to complete it
 - **Gateway "not responding" right after deploy**: Normal — the gateway takes ~60s to initialize. Wait and retry
