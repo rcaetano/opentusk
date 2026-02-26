@@ -325,27 +325,36 @@ cat "${KEY_FILE}.pub"
 BUNKEY
     )
 
-    # Add deploy key to GitHub repo via gh CLI (or prompt user)
-    log_info "Adding deploy key to GitHub repo..."
+    # Add deploy key to GitHub repo (skip if already registered)
     REPO_PATH="${POSEIDON_REPO#*:}"
     REPO_PATH="${REPO_PATH%.git}"
+    # Extract just the key material (type + base64) for comparison
+    DEPLOY_KEY_MATERIAL=$(echo "$DEPLOY_PUBKEY" | awk '{print $1 " " $2}')
 
     DEPLOY_KEY_ADDED=false
     if command -v gh &>/dev/null; then
-        KEY_TITLE="opentusk-${DO_DROPLET_NAME}"
-        if gh api "repos/${REPO_PATH}/keys" --method POST \
-            -f title="$KEY_TITLE" -f key="$DEPLOY_PUBKEY" -F read_only=true 2>/dev/null; then
-            log_info "Deploy key added to ${REPO_PATH} via gh CLI."
+        # Check if this exact key is already registered
+        EXISTING_KEYS=$(gh api "repos/${REPO_PATH}/keys" --jq '.[].key' 2>/dev/null || true)
+        if echo "$EXISTING_KEYS" | grep -qF "$DEPLOY_KEY_MATERIAL" 2>/dev/null; then
+            log_info "Deploy key already registered on ${REPO_PATH} — skipping."
             DEPLOY_KEY_ADDED=true
         else
-            log_warn "gh api failed — key may already exist or token lacks permissions."
+            log_info "Adding deploy key to GitHub repo..."
+            KEY_TITLE="opentusk-${DO_DROPLET_NAME}"
+            if gh api "repos/${REPO_PATH}/keys" --method POST \
+                -f title="$KEY_TITLE" -f key="$DEPLOY_PUBKEY" -F read_only=true 2>/dev/null; then
+                log_info "Deploy key added to ${REPO_PATH} via gh CLI."
+                DEPLOY_KEY_ADDED=true
+            else
+                log_warn "gh api failed — token may lack permissions."
+            fi
         fi
     fi
 
     if [[ "$DEPLOY_KEY_ADDED" != "true" ]]; then
         echo ""
-        log_warn "Could not add deploy key automatically."
-        echo "  Add this public key as a read-only deploy key at:"
+        log_warn "Could not verify deploy key automatically."
+        echo "  Ensure this public key is a read-only deploy key at:"
         echo "  https://github.com/${REPO_PATH}/settings/keys"
         echo ""
         echo "  $DEPLOY_PUBKEY"
