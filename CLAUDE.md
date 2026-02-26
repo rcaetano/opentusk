@@ -1,30 +1,16 @@
 # MustangClaw
 
-Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) locally via Docker or remotely on DigitalOcean.
+DigitalOcean deployment tool for [OpenClaw](https://github.com/openclaw/openclaw). Provisions droplets, manages remote upgrades, and configures Tailscale for secure access.
 
 ## Quick Reference
 
 ```
-./mustangclaw init      # configure ports & DigitalOcean (writes ~/.openclaw/config.env)
-./mustangclaw build     # clone openclaw repo & build Docker image (mustangclaw:local)
-./mustangclaw run       # start gateway container locally
-./mustangclaw setup     # run OpenClaw's onboarding wizard (API keys, models, auth)
-./mustangclaw dashboard # open OpenClaw Control in browser (auto-approves device pairing)
-./mustangclaw poseidon  # open Poseidon dashboard in browser
-./mustangclaw tui       # launch TUI client (gateway must be running)
-./mustangclaw token     # print the gateway token (for scripts or manual use)
-./mustangclaw restart   # restart the gateway container
-./mustangclaw exec CMD  # run OpenClaw CLI command in the gateway (e.g. exec health)
-./mustangclaw docker    # open a shell inside the gateway container
-./mustangclaw logs      # tail gateway container logs (--lines N)
-./mustangclaw save      # export Docker image to mustangclaw-local.tar.gz
-./mustangclaw load FILE # import Docker image from archive
-./mustangclaw audit     # full sanity check (config, scripts, Docker, repos, connectivity)
-./mustangclaw audit --remote  # include remote droplet & Tailscale checks
-./mustangclaw audit --fix     # attempt to auto-fix common issues
-./mustangclaw status    # show local container & remote droplet status
-./mustangclaw status --health  # include application-level gateway health check
-./mustangclaw run --stop  # stop the gateway
+./mustangclaw init            # configure DigitalOcean settings (writes config.env)
+./mustangclaw deploy          # create & provision DO droplet
+./mustangclaw destroy         # tear down droplet
+./mustangclaw upgrade         # upgrade remote droplet
+./mustangclaw ssh             # SSH into droplet (--tunnel for port forwarding)
+./mustangclaw audit           # sanity check of remote setup (--fix to auto-repair)
 ```
 
 ## Project Structure
@@ -33,164 +19,37 @@ Wrapper project for deploying [OpenClaw](https://github.com/openclaw/openclaw) l
 mustangclaw              # CLI entry point — dispatches subcommands to scripts/
 scripts/
   config.sh              # shared variables, colors, helpers (sourced by all scripts)
-  init.sh                # interactive wizard for MustangClaw config (ports, DO, Tailscale)
-  build.sh               # git clone + docker build (supports --browser, --apt)
-  run-local.sh           # docker compose up (seeds openclaw.json, patches for Docker)
-  docker-entrypoint.sh   # container entrypoint — patches openclaw.json on every start
-  sandbox-build.sh       # build sandbox images for agent tool isolation
-  save.sh                # export Docker image to tar.gz archive
-  load.sh                # import Docker image from tar/tar.gz archive
-  audit.sh               # full sanity check of the setup (config, Docker, repos, remote)
-  rotate-tokens.sh       # rotate device tokens with full scope set
+  init.sh                # interactive wizard for MustangClaw config (DO, Tailscale)
   deploy-do.sh           # provision DigitalOcean droplet
   destroy-do.sh          # tear down droplet
-  sync-config.sh         # sync ~/.openclaw to container (/home/node/.openclaw) or remote
-  upgrade.sh             # git pull + rebuild (local or remote)
+  upgrade.sh             # upgrade remote droplet (OpenClaw + Poseidon)
   ssh-do.sh              # SSH into droplet with optional port forwarding
-  cloud-init.yml         # cloud-init user data for droplet bootstrap
-Dockerfile.poseidon      # multi-stage build: Poseidon overlay onto mustangclaw:local
-openclaw/                # upstream openclaw repo (git-ignored, created by build)
-poseidon/                # upstream poseidon repo (git-ignored, created by build)
+  audit.sh               # sanity check of config, scripts, and remote droplet
 ```
 
 ## Configuration
 
-There are two layers of config:
-
-### 1. MustangClaw config (`~/.openclaw/config.env`)
-Written by `mustangclaw init`. Controls ports, DigitalOcean settings, and Tailscale configuration. Sourced by `scripts/config.sh` to override defaults.
-
-### 2. OpenClaw config (`~/.openclaw/openclaw.json`)
-Written by `mustangclaw setup` (OpenClaw's onboarding wizard). Controls API keys, models, gateway auth. Mounted into the Docker container at `/home/node/.openclaw/`.
+**`config.env`** — Written by `mustangclaw init` in the project root. Controls DigitalOcean settings and Tailscale configuration. Sourced by `scripts/config.sh` to override defaults. Git-ignored (contains secrets).
 
 Key variables from `scripts/config.sh`:
-- `OPENCLAW_REPO` — upstream git URL
-- `OPENCLAW_DIR` — local clone path (`./openclaw`)
-- `OPENCLAW_IMAGE` — Docker image name (`mustangclaw:local`)
-- `OPENCLAW_CONFIG_DIR` — user config dir (`~/.openclaw`)
-- `GATEWAY_PORT` / `BRIDGE_PORT` / `POSEIDON_PORT` — Docker port mappings (18789 / 18790 / 18791)
-- `POSEIDON_REPO` — Poseidon git URL
-- `POSEIDON_DIR` — local Poseidon clone path (`./poseidon`)
+- `GATEWAY_PORT` / `POSEIDON_PORT` — port numbers used in remote Tailscale serve checks (18789 / 18791)
+- `DO_DROPLET_NAME` / `DO_REGION` / `DO_SIZE` — droplet settings
+- `DO_IMAGE` — DigitalOcean marketplace image (`openclaw`)
+- `DO_SSH_KEY_FINGERPRINT` — auto-detected or set manually
+- `REMOTE_OPENCLAW_HOME` — marketplace user's home on the droplet (`/home/openclaw`)
+- `REMOTE_POSEIDON_DIR` — where Poseidon is deployed on the droplet (`/opt/poseidon`)
 - `TAILSCALE_ENABLED` — enable Tailscale on deploy (`true`/`false`)
-- `TAILSCALE_AUTH_KEY` — reusable auth key (`tskey-auth-...`) for automated deploy; if invalid, `tailscale up` will print a browser login URL as fallback
+- `TAILSCALE_AUTH_KEY` — reusable auth key (`tskey-auth-...`) for automated deploy
 - `TAILSCALE_MODE` — `"serve"` (tailnet-only) or `"funnel"` (public internet)
-
-## Poseidon Dev Mode
-
-When developing the Poseidon frontend locally against a Docker-hosted API:
-
-```bash
-cd poseidon && pnpm dev:web    # start Vite dev server on port 5173
-```
-
-The Vite dev server proxies `/api` and `/ws` requests to the Poseidon API inside Docker (port 18791 by default). Override with `VITE_API_TARGET`:
-
-```bash
-VITE_API_TARGET=http://localhost:3001 pnpm dev:web   # target a local API instead
-```
-
-The Docker entrypoint (`scripts/docker-entrypoint.sh`) includes `http://localhost:5173` in `CORS_ORIGINS` so the Vite dev server origin is accepted.
-
-## Docker Architecture
-
-- The upstream `openclaw/docker-compose.yml` defines services `openclaw-gateway` and `openclaw-cli`
-- The `.env` file at `openclaw/.env` passes our `OPENCLAW_*` variables to docker-compose (including `OPENCLAW_GATEWAY_BIND=lan`)
-- `mustangclaw run` patches `openclaw.json` on each start: sets `gateway.bind=lan`, removes `tailscale` config, and adds `controlUi.dangerouslyAllowHostHeaderOriginFallback=true` (all required for Docker networking compatibility)
-- A `docker-compose.override.yml` is generated to mount `scripts/docker-entrypoint.sh` as the container entrypoint — this re-applies the same patch on every container restart, preventing the setup wizard's hot-reload from re-introducing incompatible config
-- `mustangclaw tui` shares the gateway container's network namespace (`--network container:`) so `127.0.0.1` reaches the gateway (required by OpenClaw's loopback security check)
-- The gateway token (`OPENCLAW_GATEWAY_TOKEN`) is the API/device pairing token stored in `openclaw/.env` and passed to the container as an env var. This is separate from user-facing auth in `openclaw.json` (which may use `auth.mode: "password"` or `auth.mode: "token"`). `mustangclaw run` resolves the token from `openclaw.json` first, then `.env`, then generates a new one
-- Browser devices connecting to the dashboard must be **paired** (approved). `mustangclaw dashboard` handles this automatically. Device pairings are stored in `~/.openclaw/devices/` and go stale on gateway restarts
-- The dashboard URL uses a **hash fragment** (`/#token=...`), not a query parameter
-- **Poseidon** (agent dashboard) is bundled into the image via `Dockerfile.poseidon` — a multi-stage overlay that builds the Vite frontend and copies the Bun API + static files into `/poseidon`. The entrypoint starts Poseidon in the background on `POSEIDON_PORT` (default 18791) before launching the gateway. When Poseidon is not bundled, the entrypoint skips it gracefully
-- **Path mapping**: Host `~/.openclaw` is mounted into the container as `/home/node/.openclaw` (via docker-compose volumes). `mustangclaw sync` copies to `/home/node/.openclaw/` inside the container
-
-## Build Options
-
-```
-./mustangclaw build                     # standard build
-./mustangclaw build --browser           # pre-install Chromium/Playwright (~300MB extra)
-./mustangclaw build --apt "ffmpeg"      # install extra system packages in image
-./mustangclaw build --no-pull           # skip git pull, build from existing checkout
-```
-
-Environment variables `OPENCLAW_DOCKER_APT_PACKAGES` and `OPENCLAW_INSTALL_BROWSER=1` are also supported.
-
-## Extra Mounts & Volumes
-
-Expose host directories or persist `/home/node` across container restarts:
-
-```bash
-# Bind-mount host paths into the container (comma-separated, no spaces)
-export OPENCLAW_EXTRA_MOUNTS="$HOME/.ssh:/home/node/.ssh:ro,$HOME/data:/home/node/data:rw"
-./mustangclaw run
-
-# Persist /home/node in a named Docker volume
-export OPENCLAW_HOME_VOLUME="openclaw_home"
-./mustangclaw run
-```
-
-## Agent Sandboxing
-
-Sandbox images isolate agent tool execution in separate containers with network isolation, resource limits, and read-only root filesystems.
-
-```
-./mustangclaw sandbox              # build base sandbox image
-./mustangclaw sandbox --common     # also build extended tooling image
-./mustangclaw sandbox --browser    # also build browser automation image
-./mustangclaw sandbox --all        # build all sandbox images
-```
-
-After building, configure sandboxing in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "sandbox": {
-        "mode": "non-main",
-        "scope": "agent",
-        "docker": {
-          "image": "openclaw-sandbox:bookworm-slim",
-          "readOnlyRoot": true,
-          "network": "none",
-          "user": "1000:1000",
-          "memory": "1g",
-          "cpus": 1
-        }
-      }
-    }
-  }
-}
-```
-
-## Common Issues
-
-- **Gateway crash-loop with "Missing config"**: Run `mustangclaw run` — it seeds `openclaw.json` if missing
-- **Gateway crash-loop with "tailscale serve/funnel requires bind=loopback"**: Run `mustangclaw run` — it auto-patches this
-- **Dashboard "pairing required"**: Run `mustangclaw dashboard` — it auto-approves device pairing. If it persists, clear browser localStorage for `localhost:18789` and retry
-- **Dashboard "device token mismatch"**: Clear `~/.openclaw/devices/`, restart gateway (`mustangclaw run --stop && mustangclaw run`), and clear browser localStorage for `localhost:18789`
-- **Dashboard "gateway token missing"**: The token wasn't passed via the URL. Use `mustangclaw dashboard` or paste the token (from `mustangclaw token`) into Control UI settings
-- **TUI "device token mismatch"**: `mustangclaw tui` auto-clears device tokens; if it persists, run `mustangclaw run --stop && mustangclaw run`
-- **TUI "gateway not connected"**: Ensure gateway is running (`mustangclaw status`), then clear `~/.openclaw/devices/` and retry
-- **"session file locked" in dashboard chat**: Stale lock file from unclean shutdown. Remove it: `docker exec mustangclaw rm /home/node/.openclaw/agents/main/sessions/*.lock`
-- **Token mismatch between .env and openclaw.json**: `mustangclaw run` reads the token from `openclaw.json` to keep them aligned
-- **Gateway unhealthy but container running**: Run `mustangclaw status --health` to check application-level health
-- **Deploy fails at "tailscale up"**: The auth key is invalid or expired. SSH into the droplet as root and run `tailscale up` interactively (browser login), then configure serve manually (see Tailscale section above)
-- **Poseidon unreachable over Tailscale**: Check `tailscale serve status` on the droplet. If empty, reconfigure: `tailscale serve --bg --https=443 http://localhost:18791`
-- **Gateway fails with "non-loopback Control UI requires allowedOrigins"**: Run `mustangclaw run` — it auto-patches `controlUi.dangerouslyAllowHostHeaderOriginFallback=true`. If on an older OpenClaw version that rejects this key, upgrade the Docker image first (`mustangclaw build`)
-- **Remote gateway fails with "Unrecognized key: controlUi"**: The remote Docker image is older than the local scripts. Upgrade with `mustangclaw upgrade --target remote`
-- **Tailscale hostname has "-1" suffix**: Another device with the same name exists on your tailnet. Remove the old device from Tailscale admin or use the suffixed name
-- **Tailscale serve still uses old hostname after rename**: Run `tailscale serve reset` on the droplet, then reconfigure: `tailscale serve --bg --https=443 http://localhost:18791` and `tailscale serve --bg --https=8443 http://localhost:18789`
 
 ## DigitalOcean Deployment
 
 ```
 ./mustangclaw init              # set DO token, region, size
 ./mustangclaw deploy            # create & provision droplet
-./mustangclaw sync              # push ~/.openclaw config to remote
-./mustangclaw ssh --tunnel      # SSH with port forwarding (gateway, bridge, poseidon)
-./mustangclaw upgrade --target remote  # pull latest & rebuild on droplet
-./mustangclaw audit --remote    # full sanity check including remote droplet
+./mustangclaw ssh --tunnel      # SSH with port forwarding (gateway, poseidon)
+./mustangclaw upgrade           # pull latest & rebuild on droplet
+./mustangclaw audit             # sanity check of remote setup
 ./mustangclaw destroy           # tear down droplet
 ```
 
@@ -198,27 +57,24 @@ Requires `doctl` CLI and `DIGITALOCEAN_ACCESS_TOKEN` (configured via `mustangcla
 
 ### Upgrading
 
-`~/.openclaw` (host) is a bind mount — it is **never** inside the Docker image and is preserved across rebuilds and restarts. Upgrades only rebuild the image and restart the container.
-
-**Remote config is never overwritten.** When upgrading a remote droplet, if `~/.openclaw` already exists on the remote it is left untouched. If it doesn't exist (e.g., the droplet was recreated), it is seeded from the local `~/.openclaw`. Use `mustangclaw sync --target remote` to explicitly push local config to the remote.
-
 ```bash
-# Local: pull latest OpenClaw + Poseidon, rebuild, restart
-./mustangclaw upgrade
-
-# Remote: rsync scripts + poseidon source, pull openclaw on droplet, rebuild, restart
-./mustangclaw upgrade --target remote
-
-# Rollback to previous commit (local or remote)
-./mustangclaw upgrade --rollback
-./mustangclaw upgrade --target remote --rollback
+./mustangclaw upgrade                  # update OpenClaw + Poseidon on remote
+./mustangclaw upgrade --ip 1.2.3.4     # target specific droplet
+./mustangclaw upgrade --rollback        # revert OpenClaw on remote
 ```
 
-The remote upgrade rsyncs the Poseidon source from local to the droplet (Poseidon is a private repo that can't be git-cloned on the remote). OpenClaw is pulled via `git pull` directly on the droplet.
+The remote upgrade uses the marketplace updater for OpenClaw and rsyncs Poseidon source from your local machine (private repo that can't be git-cloned on the remote).
+
+### Deployment Notes
+
+- The `openclaw` DO marketplace image is pre-configured with OpenClaw and systemd services
+- The deploy creates a 2GB swap file to prevent OOM on smaller droplets
+- The recommended droplet size is `s-4vcpu-8gb`; smaller sizes may OOM during builds
+- The gateway takes **~60 seconds** to initialize after starting; smoke tests may show "not responding yet" — this is normal
 
 ### Tailscale
 
-When Tailscale is enabled (`mustangclaw init` or manually in `config.env`), the deploy script installs Tailscale and configures `tailscale serve`:
+When Tailscale is enabled (`mustangclaw init`), the deploy script installs Tailscale and configures `tailscale serve`:
 - **Poseidon** (primary): `https://<droplet>.<tailnet>.ts.net` (port 443)
 - **Gateway Control**: `https://<droplet>.<tailnet>.ts.net:8443` (port 8443)
 
@@ -233,9 +89,10 @@ tailscale serve --bg --https=443 http://localhost:18791  # Poseidon
 tailscale serve --bg --https=8443 http://localhost:18789 # Gateway
 ```
 
-### Deployment Notes
+## Common Issues
 
-- The `docker-20-04` DO image slug maps to **Docker on Ubuntu 22.04** (not 20.04 — DigitalOcean reuses the slug)
-- The deploy creates a 2GB swap file to prevent OOM during Docker builds on smaller droplets
-- The recommended droplet size is `s-4vcpu-8gb`; smaller sizes may OOM during the ~5 minute Docker build
-- The gateway takes **~60 seconds** to initialize after `mustangclaw run`; the deploy's smoke test may show "not responding yet" — this is normal
+- **Deploy fails at "tailscale up"**: The auth key is invalid or expired. SSH into the droplet as root and run `tailscale up` interactively (browser login), then configure serve manually (see Tailscale section above)
+- **Poseidon unreachable over Tailscale**: Check `tailscale serve status` on the droplet. If empty, reconfigure: `tailscale serve --bg --https=443 http://localhost:18791`
+- **Tailscale hostname has "-1" suffix**: Another device with the same name exists on your tailnet. Remove the old device from Tailscale admin or use the suffixed name
+- **Tailscale serve still uses old hostname after rename**: Run `tailscale serve reset` on the droplet, then reconfigure serve entries
+- **Gateway "not responding" right after deploy**: Normal — the gateway takes ~60s to initialize. Wait and retry

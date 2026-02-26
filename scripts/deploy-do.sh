@@ -46,7 +46,6 @@ log_info "Validating prerequisites..."
 
 require_cmd doctl
 require_cmd ssh
-require_cmd ssh-keygen
 require_cmd rsync
 
 if [[ -z "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
@@ -76,7 +75,7 @@ EXISTING_IP=$(doctl compute droplet list --tag-name "$DO_TAG" \
 
 if [[ -n "$EXISTING_IP" ]]; then
     log_warn "Droplet '$DO_DROPLET_NAME' already exists at $EXISTING_IP."
-    log_warn "To recreate, run destroy-do.sh first."
+    log_warn "To recreate, run 'mustangclaw destroy' first."
     exit 0
 fi
 
@@ -144,6 +143,33 @@ done
 echo ""
 log_info "SSH is ready."
 
+# Wait for marketplace first-boot / cloud-init to finish
+# The marketplace image prints "Please wait while we get your droplet ready..."
+# during setup. If we rsync or run commands before it completes, the banner
+# text corrupts the protocol stream.
+log_info "Waiting for cloud-init to finish..."
+CLOUD_WAIT=0
+CLOUD_MAX=300
+while true; do
+    CLOUD_STATUS=$(ssh -o ConnectTimeout=5 "${DO_SSH_USER}@${DROPLET_IP}" \
+        'cloud-init status 2>/dev/null | grep -oE "done|running|error" || echo "unknown"' 2>/dev/null || echo "unknown")
+    if [[ "$CLOUD_STATUS" == "done" ]]; then
+        break
+    elif [[ "$CLOUD_STATUS" == "error" ]]; then
+        log_warn "cloud-init finished with errors — continuing anyway."
+        break
+    fi
+    sleep 5
+    CLOUD_WAIT=$((CLOUD_WAIT + 5))
+    if [[ $CLOUD_WAIT -ge $CLOUD_MAX ]]; then
+        log_warn "cloud-init still running after ${CLOUD_MAX}s — continuing anyway."
+        break
+    fi
+    printf "."
+done
+echo ""
+log_info "Droplet ready (cloud-init: $CLOUD_STATUS, ${CLOUD_WAIT}s)."
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 5: Configure OpenClaw
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -175,7 +201,6 @@ JSONEOF
 # Write config.env for port settings
 cat > ${REMOTE_OPENCLAW_HOME}/.openclaw/config.env <<CFGEOF
 GATEWAY_PORT=${GATEWAY_PORT}
-BRIDGE_PORT=${BRIDGE_PORT}
 POSEIDON_PORT=${POSEIDON_PORT}
 CFGEOF
 chmod 600 ${REMOTE_OPENCLAW_HOME}/.openclaw/config.env
@@ -226,7 +251,7 @@ set -euo pipefail
 # Write environment file
 cat > /opt/poseidon.env <<ENVEOF
 PORT=${POSEIDON_PORT}
-GATEWAY_URL=http://localhost:${GATEWAY_PORT}
+GATEWAY_URL=ws://127.0.0.1:${GATEWAY_PORT}
 GATEWAY_TOKEN=${GATEWAY_TOKEN}
 POSEIDON_STATIC_DIR=${REMOTE_POSEIDON_DIR}/apps/web/dist
 OPENCLAW_SOURCE=mustangclaw
@@ -265,6 +290,10 @@ fi
 # Phase 7: Tailscale (if enabled)
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
+    if [[ -z "${TAILSCALE_AUTH_KEY:-}" ]]; then
+        log_warn "TAILSCALE_AUTH_KEY is empty — Tailscale will install but 'tailscale up' will fail."
+        log_warn "After deploy, SSH in and run 'tailscale up' interactively (browser login)."
+    fi
     log_info "Installing and configuring Tailscale..."
     ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<TAILSCALE
 set -euo pipefail
@@ -275,7 +304,7 @@ if ! command -v tailscale &>/dev/null; then
 fi
 
 # Authenticate
-tailscale up --auth-key='${TAILSCALE_AUTH_KEY}'
+tailscale up --auth-key="${TAILSCALE_AUTH_KEY}" --hostname="${DO_DROPLET_NAME}"
 
 # Configure serve/funnel
 echo "Configuring Tailscale ${TAILSCALE_MODE}..."
@@ -283,13 +312,17 @@ TAILSCALE
 
     if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
         ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<TSFUNNEL
+set -euo pipefail
 tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
 tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
+echo "Tailscale funnel configured."
 TSFUNNEL
     else
         ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<TSSERVE
+set -euo pipefail
 tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
 tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
+echo "Tailscale serve configured."
 TSSERVE
     fi
 
@@ -322,6 +355,48 @@ if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
         log_error "  Poseidon service: $POS_STATUS"
         SMOKE_OK=false
     fi
+fi
+
+# Check Tailscale (if enabled)
+if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
+    TS_STATE=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<'TSSMOKE'
+if ! command -v tailscale &>/dev/null; then
+    echo "not_installed"
+    exit 0
+fi
+if ! tailscale status --self --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if d.get('Self',{}).get('Online') else 1)" 2>/dev/null; then
+    echo "not_online"
+    exit 0
+fi
+serve_out=$(tailscale serve status 2>&1)
+missing=""
+if ! echo "$serve_out" | grep -q "localhost:${POSEIDON_PORT}"; then
+    missing="poseidon"
+fi
+if ! echo "$serve_out" | grep -q "localhost:${GATEWAY_PORT}"; then
+    missing="${missing:+$missing,}gateway"
+fi
+if [[ -n "$missing" ]]; then
+    echo "serve_missing:$missing"
+else
+    echo "ok"
+fi
+TSSMOKE
+    )
+    case "$TS_STATE" in
+        ok)
+            log_info "  Tailscale: online, serve configured" ;;
+        not_installed)
+            log_error "  Tailscale: binary not installed"
+            SMOKE_OK=false ;;
+        not_online)
+            log_error "  Tailscale: installed but not online (auth may have failed)"
+            SMOKE_OK=false ;;
+        serve_missing:*)
+            log_warn "  Tailscale: online but serve incomplete (${TS_STATE#serve_missing:})" ;;
+        *)
+            log_warn "  Tailscale: unknown state ($TS_STATE)" ;;
+    esac
 fi
 
 # Check gateway port (gateway takes ~60s to initialize)
@@ -359,8 +434,8 @@ echo "  Gateway:     ssh -L ${GATEWAY_PORT}:localhost:${GATEWAY_PORT} ${DO_SSH_U
 echo "               then open http://localhost:${GATEWAY_PORT}"
 echo ""
 # Write credentials to a file instead of printing to terminal
-CREDS_FILE="$OPENCLAW_CONFIG_DIR/remote-credentials"
-mkdir -p "$OPENCLAW_CONFIG_DIR"
+CREDS_FILE="$HOME/.openclaw/remote-credentials"
+mkdir -p "$HOME/.openclaw"
 cat > "$CREDS_FILE" <<CREDEOF
 # MustangClaw remote deployment credentials
 # Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
