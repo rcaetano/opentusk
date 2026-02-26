@@ -9,7 +9,8 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Create and provision an MustangClaw gateway on a DigitalOcean droplet.
+Create and provision an MustangClaw gateway on a DigitalOcean droplet
+using the OpenClaw marketplace image.
 
 This script is idempotent — if the droplet already exists, it will skip creation.
 
@@ -89,20 +90,15 @@ if [[ "$DRY_RUN" == "true" ]]; then
   Name:     $DO_DROPLET_NAME
   Region:   $DO_REGION
   Size:     $DO_SIZE
-  Image:    $DO_IMAGE
+  Image:    $DO_IMAGE (marketplace)
   SSH Key:  $DO_SSH_KEY_FINGERPRINT
   Tag:      $DO_TAG
   Tailscale: $TAILSCALE_ENABLED (mode: $TAILSCALE_MODE)
 
-Then provision via SSH:
-  - Create 'mustangclaw' user with docker group
-  - Configure UFW (SSH only)
-  - Install fail2ban
-  - Harden sshd
-  - Deploy wrapper project via rsync
-  - Build Docker images (openclaw + poseidon)
-  - Generate gateway token
-  - Start gateway via mustangclaw run
+Then provision via SSH (as $DO_SSH_USER):
+  - Write OpenClaw config (openclaw.json with gateway token)
+  - Restart openclaw systemd service
+  - Deploy Poseidon (install bun, rsync source, build, systemd service)
 EOF
     if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         echo "  - Install Tailscale ($TAILSCALE_MODE mode)"
@@ -114,14 +110,13 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 3: Create droplet
 # ═══════════════════════════════════════════════════════════════════════════════
-log_info "Creating droplet '$DO_DROPLET_NAME'..."
+log_info "Creating droplet '$DO_DROPLET_NAME' (marketplace image: $DO_IMAGE)..."
 doctl compute droplet create "$DO_DROPLET_NAME" \
     --image "$DO_IMAGE" \
     --region "$DO_REGION" \
     --size "$DO_SIZE" \
     --ssh-keys "$DO_SSH_KEY_FINGERPRINT" \
     --tag-name "$DO_TAG" \
-    --user-data-file "$SCRIPT_DIR/cloud-init.yml" \
     --wait
 
 DROPLET_IP=$(get_droplet_ip)
@@ -130,157 +125,45 @@ log_info "Droplet created at $DROPLET_IP."
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 4: Wait for SSH
 # ═══════════════════════════════════════════════════════════════════════════════
-log_info "Waiting for SSH and cloud-init to finish..."
-MAX_WAIT=300
+log_info "Waiting for SSH to become available..."
+MAX_WAIT=180
 ELAPSED=0
 while true; do
-    # Try SSH; on success check if cloud-init has finished
     if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-            "root@${DROPLET_IP}" "cloud-init status --wait >/dev/null 2>&1 || sleep 1; true" 2>/dev/null; then
+            "${DO_SSH_USER}@${DROPLET_IP}" "true" 2>/dev/null; then
         break
     fi
     sleep 5
     ELAPSED=$((ELAPSED + 5))
     if [[ $ELAPSED -ge $MAX_WAIT ]]; then
-        log_error "SSH/cloud-init not ready after ${MAX_WAIT}s. Check droplet status."
+        log_error "SSH not ready after ${MAX_WAIT}s. Check droplet status."
         exit 1
     fi
     printf "."
 done
 echo ""
-log_info "SSH is ready and cloud-init complete."
+log_info "SSH is ready."
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 5: Security hardening (runs as root)
+# Phase 5: Configure OpenClaw
 # ═══════════════════════════════════════════════════════════════════════════════
 GATEWAY_TOKEN=$(openssl rand -hex 32)
-GATEWAY_PASSWORD=$(openssl rand -hex 16)
 
-log_info "Hardening droplet security..."
+log_info "Configuring OpenClaw on remote..."
 
-# Build the Tailscale provisioning block conditionally
-TAILSCALE_BLOCK=""
-if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
-    TAILSCALE_BLOCK=$(cat <<'TSEOF'
-# ── Tailscale ────────────────────────────────────────────────────────────
-echo "Installing Tailscale..."
-curl -fsSL https://tailscale.com/install.sh | sh
-TSEOF
-)
-    # Append auth and mode configuration with variable expansion
-    TAILSCALE_BLOCK="$TAILSCALE_BLOCK
-tailscale up --auth-key='${TAILSCALE_AUTH_KEY}'
-"
-    if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
-        TAILSCALE_BLOCK="$TAILSCALE_BLOCK
-echo 'Configuring Tailscale Funnel (gateway on 8443) + Serve (Poseidon on 443)...'
-tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
-tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
-"
-    elif [[ "$TAILSCALE_MODE" == "serve" ]]; then
-        TAILSCALE_BLOCK="$TAILSCALE_BLOCK
-echo 'Configuring Tailscale Serve (gateway on 8443, Poseidon on 443)...'
-tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
-tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
-"
-    fi
-fi
-
-ssh "root@${DROPLET_IP}" bash <<PROVISION
+ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<CONFIGURE
 set -euo pipefail
 
-# ── Swap (prevents OOM during Docker builds on small droplets) ──────────────
-if [[ ! -f /swapfile ]]; then
-    echo "Creating 2G swap..."
-    fallocate -l 2G /swapfile
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
-    echo '/swapfile none swap sw 0 0' >> /etc/fstab
-fi
-
-# ── Create mustangclaw user ─────────────────────────────────────────────────
-if ! id mustangclaw &>/dev/null; then
-    useradd -m -s /bin/bash -G docker mustangclaw
-    # Copy root's authorized_keys so we can SSH as mustangclaw
-    mkdir -p /home/mustangclaw/.ssh
-    cp /root/.ssh/authorized_keys /home/mustangclaw/.ssh/authorized_keys
-    chown -R mustangclaw:mustangclaw /home/mustangclaw/.ssh
-    chmod 700 /home/mustangclaw/.ssh
-    chmod 600 /home/mustangclaw/.ssh/authorized_keys
-fi
-
-# ── UFW firewall ─────────────────────────────────────────────────────────
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 22/tcp
-ufw --force enable
-
-# ── Symlink mustangclaw to PATH ─────────────────────────────────────────
-ln -sf /home/mustangclaw/mustangclaw/mustangclaw /usr/local/bin/mustangclaw
-
-# ── fail2ban ─────────────────────────────────────────────────────────────
-apt-get install -y fail2ban
-systemctl enable fail2ban
-systemctl start fail2ban
-
-# ── SSHD hardening ───────────────────────────────────────────────────────
-cat > /etc/ssh/sshd_config.d/99-mustangclaw-hardening.conf <<'SSHEOF'
-PasswordAuthentication no
-PermitRootLogin prohibit-password
-ChallengeResponseAuthentication no
-SSHEOF
-systemctl reload sshd
-
-${TAILSCALE_BLOCK}
-
-echo "Security hardening complete."
-PROVISION
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 6: Deploy wrapper project and build
-# ═══════════════════════════════════════════════════════════════════════════════
-log_info "Deploying MustangClaw wrapper to remote..."
-rsync -avz --progress -e "ssh" \
-    --exclude='openclaw/' --exclude='.git/' \
-    --exclude='node_modules/' --exclude='.openclaw/' \
-    "$PROJECT_ROOT/" "mustangclaw@${DROPLET_IP}:/home/mustangclaw/mustangclaw/"
-
-# Rsync poseidon source separately (private repo, can't clone on remote)
-if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
-    log_info "Syncing Poseidon source to remote..."
-    rsync -avz --progress -e "ssh" \
-        --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
-        "$PROJECT_ROOT/poseidon/" "mustangclaw@${DROPLET_IP}:/home/mustangclaw/mustangclaw/poseidon/"
-fi
-
-log_info "Building Docker images and starting gateway on remote..."
-ssh "mustangclaw@${DROPLET_IP}" bash <<DEPLOY
-set -euo pipefail
-cd /home/mustangclaw/mustangclaw
-chmod +x mustangclaw
-
-# Build (clones openclaw, uses rsynced poseidon, builds Docker images)
-./mustangclaw build --no-pull
-
-# Seed config directory with correct permissions
-mkdir -p /home/mustangclaw/.openclaw/workspace
-chmod 700 /home/mustangclaw/.openclaw
-chmod 700 /home/mustangclaw/.openclaw/workspace
-
-cat > /home/mustangclaw/.openclaw/config.env <<CFGEOF
-GATEWAY_PORT=${GATEWAY_PORT}
-BRIDGE_PORT=${BRIDGE_PORT}
-POSEIDON_PORT=${POSEIDON_PORT}
-CFGEOF
-chmod 600 /home/mustangclaw/.openclaw/config.env
+# Ensure config directory exists with correct permissions
+mkdir -p ${REMOTE_OPENCLAW_HOME}/.openclaw/workspace
+chmod 700 ${REMOTE_OPENCLAW_HOME}/.openclaw
+chmod 700 ${REMOTE_OPENCLAW_HOME}/.openclaw/workspace
 
 # Write openclaw.json with gateway token
-cat > /home/mustangclaw/.openclaw/openclaw.json <<JSONEOF
+cat > ${REMOTE_OPENCLAW_HOME}/.openclaw/openclaw.json <<JSONEOF
 {
   "gateway": {
     "mode": "local",
-    "bind": "lan",
     "auth": {
       "mode": "token",
       "token": "${GATEWAY_TOKEN}"
@@ -288,36 +171,165 @@ cat > /home/mustangclaw/.openclaw/openclaw.json <<JSONEOF
   }
 }
 JSONEOF
-chmod 600 /home/mustangclaw/.openclaw/openclaw.json
 
-# Start the gateway (generates .env, override, starts containers with Poseidon)
-./mustangclaw run
+# Write config.env for port settings
+cat > ${REMOTE_OPENCLAW_HOME}/.openclaw/config.env <<CFGEOF
+GATEWAY_PORT=${GATEWAY_PORT}
+BRIDGE_PORT=${BRIDGE_PORT}
+POSEIDON_PORT=${POSEIDON_PORT}
+CFGEOF
+chmod 600 ${REMOTE_OPENCLAW_HOME}/.openclaw/config.env
+chmod 600 ${REMOTE_OPENCLAW_HOME}/.openclaw/openclaw.json
 
-echo "Deploy complete."
-DEPLOY
+# Set ownership
+chown -R openclaw:openclaw ${REMOTE_OPENCLAW_HOME}/.openclaw
+
+# Restart OpenClaw systemd service
+systemctl restart openclaw
+echo "OpenClaw configured and restarted."
+CONFIGURE
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 7: Post-deploy smoke test
+# Phase 6: Deploy Poseidon
+# ═══════════════════════════════════════════════════════════════════════════════
+if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
+    log_info "Installing bun on remote..."
+    ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<'BUNINSTALL'
+set -euo pipefail
+if ! command -v bun &>/dev/null; then
+    curl -fsSL https://bun.sh/install | bash
+    ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
+fi
+bun install -g pnpm
+ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
+echo "bun $(bun --version), pnpm $(pnpm --version)"
+BUNINSTALL
+
+    log_info "Syncing Poseidon source to remote..."
+    rsync -avz --progress -e "ssh" \
+        --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
+        "$PROJECT_ROOT/poseidon/" "${DO_SSH_USER}@${DROPLET_IP}:${REMOTE_POSEIDON_DIR}/"
+
+    log_info "Building Poseidon on remote..."
+    ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<POSEIDON_BUILD
+set -euo pipefail
+cd ${REMOTE_POSEIDON_DIR}
+pnpm install --frozen-lockfile
+pnpm --filter @poseidon/web build
+chown -R openclaw:openclaw ${REMOTE_POSEIDON_DIR}
+POSEIDON_BUILD
+
+    log_info "Creating Poseidon systemd service..."
+    ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<POSEIDON_SERVICE
+set -euo pipefail
+
+# Write environment file
+cat > /opt/poseidon.env <<ENVEOF
+PORT=${POSEIDON_PORT}
+GATEWAY_URL=http://localhost:${GATEWAY_PORT}
+GATEWAY_TOKEN=${GATEWAY_TOKEN}
+POSEIDON_STATIC_DIR=${REMOTE_POSEIDON_DIR}/apps/web/dist
+OPENCLAW_SOURCE=mustangclaw
+ENVEOF
+chmod 600 /opt/poseidon.env
+
+# Write systemd unit
+cat > /etc/systemd/system/poseidon.service <<'UNITEOF'
+[Unit]
+Description=Poseidon Agent Dashboard
+After=openclaw.service
+
+[Service]
+Type=simple
+User=openclaw
+WorkingDirectory=/opt/poseidon
+EnvironmentFile=/opt/poseidon.env
+ExecStart=/usr/local/bin/bun apps/api/src/index.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+
+systemctl daemon-reload
+systemctl enable poseidon
+systemctl start poseidon
+echo "Poseidon service started."
+POSEIDON_SERVICE
+else
+    log_warn "Poseidon source not found at $PROJECT_ROOT/poseidon — skipping Poseidon deploy."
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 7: Tailscale (if enabled)
+# ═══════════════════════════════════════════════════════════════════════════════
+if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
+    log_info "Installing and configuring Tailscale..."
+    ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<TAILSCALE
+set -euo pipefail
+
+# Install Tailscale
+if ! command -v tailscale &>/dev/null; then
+    curl -fsSL https://tailscale.com/install.sh | sh
+fi
+
+# Authenticate
+tailscale up --auth-key='${TAILSCALE_AUTH_KEY}'
+
+# Configure serve/funnel
+echo "Configuring Tailscale ${TAILSCALE_MODE}..."
+TAILSCALE
+
+    if [[ "$TAILSCALE_MODE" == "funnel" ]]; then
+        ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<TSFUNNEL
+tailscale funnel --bg --https=8443 http://localhost:${GATEWAY_PORT}
+tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
+TSFUNNEL
+    else
+        ssh "${DO_SSH_USER}@${DROPLET_IP}" bash <<TSSERVE
+tailscale serve --bg --https=8443 http://localhost:${GATEWAY_PORT}
+tailscale serve --bg --https=443 http://localhost:${POSEIDON_PORT}
+TSSERVE
+    fi
+
+    log_info "Tailscale configured ($TAILSCALE_MODE mode)."
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 8: Smoke test
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Running post-deploy smoke test..."
 SMOKE_OK=true
 
-# Check container is running
-CONTAINER_STATUS=$(ssh "mustangclaw@${DROPLET_IP}" \
-    'docker ps --filter "name=^mustangclaw$" --filter "status=running" --format "{{.Status}}"' 2>/dev/null || true)
-if [[ -n "$CONTAINER_STATUS" ]]; then
-    log_info "  Container: running ($CONTAINER_STATUS)"
+# Check OpenClaw systemd service
+OC_STATUS=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+    'systemctl is-active openclaw 2>/dev/null' || true)
+if [[ "$OC_STATUS" == "active" ]]; then
+    log_info "  OpenClaw service: active"
 else
-    log_error "  Container: NOT running"
+    log_error "  OpenClaw service: $OC_STATUS"
     SMOKE_OK=false
 fi
 
-# Check gateway port is listening (gateway takes ~60s to initialize)
+# Check Poseidon systemd service
+if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
+    POS_STATUS=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+        'systemctl is-active poseidon 2>/dev/null' || true)
+    if [[ "$POS_STATUS" == "active" ]]; then
+        log_info "  Poseidon service: active"
+    else
+        log_error "  Poseidon service: $POS_STATUS"
+        SMOKE_OK=false
+    fi
+fi
+
+# Check gateway port (gateway takes ~60s to initialize)
 log_info "  Waiting up to 90s for gateway to start..."
 GW_READY=false
 GW_ELAPSED=0
 while [[ $GW_ELAPSED -lt 90 ]]; do
-    if ssh "mustangclaw@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
+    if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
         GW_READY=true
         break
     fi
@@ -333,17 +345,17 @@ else
 fi
 
 if [[ "$SMOKE_OK" != "true" ]]; then
-    log_error "Smoke test failed. Check: ssh mustangclaw@${DROPLET_IP}"
+    log_error "Smoke test failed. Check: ssh ${DO_SSH_USER}@${DROPLET_IP}"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 8: Print connection summary
+# Phase 9: Print connection summary
 # ═══════════════════════════════════════════════════════════════════════════════
 log_info "Deployment complete!"
 echo ""
 echo "  Droplet IP:  $DROPLET_IP"
-echo "  SSH:         ssh mustangclaw@${DROPLET_IP}"
-echo "  Gateway:     ssh -L ${GATEWAY_PORT}:localhost:${GATEWAY_PORT} mustangclaw@${DROPLET_IP}"
+echo "  SSH:         ssh ${DO_SSH_USER}@${DROPLET_IP}"
+echo "  Gateway:     ssh -L ${GATEWAY_PORT}:localhost:${GATEWAY_PORT} ${DO_SSH_USER}@${DROPLET_IP}"
 echo "               then open http://localhost:${GATEWAY_PORT}"
 echo ""
 # Write credentials to a file instead of printing to terminal
@@ -354,12 +366,10 @@ cat > "$CREDS_FILE" <<CREDEOF
 # Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
 # Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 GATEWAY_TOKEN=$GATEWAY_TOKEN
-GATEWAY_PASSWORD=$GATEWAY_PASSWORD
 CREDEOF
 chmod 600 "$CREDS_FILE"
 echo "  Credentials saved to: $CREDS_FILE"
 echo "  Gateway token:    ${GATEWAY_TOKEN:0:8}..."
-echo "  Gateway password: ${GATEWAY_PASSWORD:0:8}..."
 echo ""
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     echo "  Tailscale:   $TAILSCALE_MODE mode"

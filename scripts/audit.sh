@@ -159,7 +159,7 @@ REQUIRED_SCRIPTS=(
 scripts_ok=true
 for script in "${REQUIRED_SCRIPTS[@]}"; do
     if [[ -f "$PROJECT_ROOT/scripts/$script" ]]; then
-        if [[ -x "$PROJECT_ROOT/scripts/$script" || "$script" == "config.sh" || "$script" == "cloud-init.yml" ]]; then
+        if [[ -x "$PROJECT_ROOT/scripts/$script" || "$script" == "config.sh" ]]; then
             true  # fine
         else
             warn "$script exists but not executable"
@@ -341,44 +341,44 @@ if [[ "$CHECK_REMOTE" == "true" ]]; then
             pass "Droplet '$DO_DROPLET_NAME' at $DROPLET_IP"
 
             # SSH connectivity
-            if ssh -o ConnectTimeout=5 -o BatchMode=yes "mustangclaw@${DROPLET_IP}" true 2>/dev/null; then
-                pass "SSH access OK (mustangclaw@${DROPLET_IP})"
+            if ssh -o ConnectTimeout=5 -o BatchMode=yes "${DO_SSH_USER}@${DROPLET_IP}" true 2>/dev/null; then
+                pass "SSH access OK (${DO_SSH_USER}@${DROPLET_IP})"
 
-                # Container running
-                remote_status=$(ssh "mustangclaw@${DROPLET_IP}" \
-                    'docker ps --filter "name=^mustangclaw$" --filter "status=running" --format "{{.Status}}"' 2>/dev/null || true)
-                if [[ -n "$remote_status" ]]; then
-                    pass "Remote container running: $remote_status"
+                # OpenClaw systemd service
+                oc_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                    'systemctl is-active openclaw 2>/dev/null' 2>/dev/null || true)
+                if [[ "$oc_status" == "active" ]]; then
+                    pass "OpenClaw service: active"
                 else
-                    fail "Remote container not running"
+                    fail "OpenClaw service: $oc_status"
                 fi
 
-                # Gateway check
-                if ssh "mustangclaw@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
+                # Poseidon systemd service
+                pos_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" \
+                    'systemctl is-active poseidon 2>/dev/null' 2>/dev/null || true)
+                if [[ "$pos_status" == "active" ]]; then
+                    pass "Poseidon service: active"
+                else
+                    fail "Poseidon service: $pos_status"
+                fi
+
+                # Gateway HTTP check
+                if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${GATEWAY_PORT}" 2>/dev/null; then
                     pass "Remote gateway responding on port ${GATEWAY_PORT}"
                 else
                     fail "Remote gateway not responding"
                 fi
 
-                # Poseidon check
-                if ssh "mustangclaw@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${POSEIDON_PORT}" 2>/dev/null; then
+                # Poseidon HTTP check
+                if ssh "${DO_SSH_USER}@${DROPLET_IP}" "curl -sf -o /dev/null http://localhost:${POSEIDON_PORT}" 2>/dev/null; then
                     pass "Remote Poseidon responding on port ${POSEIDON_PORT}"
                 else
                     fail "Remote Poseidon not responding"
                 fi
 
-                # Poseidon in container
-                remote_poseidon=$(ssh "mustangclaw@${DROPLET_IP}" \
-                    'docker exec mustangclaw sh -c "test -d /poseidon && echo yes || echo no"' 2>/dev/null || true)
-                if [[ "$remote_poseidon" == "yes" ]]; then
-                    pass "Poseidon bundled in remote image"
-                else
-                    fail "Poseidon NOT bundled in remote image"
-                fi
-
                 # Tailscale
                 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
-                    ts_status=$(ssh root@${DROPLET_IP} 'tailscale status --self --json 2>/dev/null' 2>/dev/null || true)
+                    ts_status=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale status --self --json 2>/dev/null' 2>/dev/null || true)
                     if [[ -n "$ts_status" ]]; then
                         ts_name=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').split('.')[0])" 2>/dev/null || true)
                         ts_online=$(echo "$ts_status" | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('Online',False))" 2>/dev/null || true)
@@ -389,7 +389,7 @@ if [[ "$CHECK_REMOTE" == "true" ]]; then
                         fi
 
                         # Serve config
-                        serve_out=$(ssh root@${DROPLET_IP} 'tailscale serve status 2>&1' 2>/dev/null || true)
+                        serve_out=$(ssh "${DO_SSH_USER}@${DROPLET_IP}" 'tailscale serve status 2>&1' 2>/dev/null || true)
                         if echo "$serve_out" | grep -q "localhost:${POSEIDON_PORT}" 2>/dev/null; then
                             pass "Tailscale serve: Poseidon on HTTPS 443"
                         else
@@ -416,14 +416,14 @@ if [[ "$CHECK_REMOTE" == "true" ]]; then
                             fi
                         fi
                     else
-                        fail "Cannot read Tailscale status (SSH as root may be needed)"
+                        fail "Cannot read Tailscale status"
                     fi
                 else
                     skip "Tailscale checks (TAILSCALE_ENABLED=false)"
                 fi
             else
-                fail "Cannot SSH to mustangclaw@${DROPLET_IP}"
-                skip "Remote container and service checks"
+                fail "Cannot SSH to ${DO_SSH_USER}@${DROPLET_IP}"
+                skip "Remote service and connectivity checks"
             fi
         fi
     fi

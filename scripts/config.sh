@@ -22,21 +22,20 @@ POSEIDON_PORT=18791
 # ─── DigitalOcean ────────────────────────────────────────────────────────────
 DO_DROPLET_NAME="mustangclaw"
 DO_REGION="fra1"
-DO_SIZE="s-4vcpu-8gb"
-DO_IMAGE="docker-20-04"
-DO_SSH_KEY_FINGERPRINT=""                   # auto-detected or set manually
+DO_SIZE="s-2vcpu-4gb"
+DO_IMAGE="openclaw"                           # DO marketplace image
+DO_SSH_KEY_FINGERPRINT=""                     # auto-detected or set manually
 DO_TAG="mustangclaw"
+DO_SSH_USER="root"                            # marketplace convention
+
+# ─── Remote Paths ──────────────────────────────────────────────────────────
+REMOTE_OPENCLAW_HOME="/home/openclaw"         # marketplace user's home
+REMOTE_POSEIDON_DIR="/opt/poseidon"           # where Poseidon is deployed
 
 # ─── Tailscale (optional) ───────────────────────────────────────────────────
 TAILSCALE_ENABLED=false
 TAILSCALE_AUTH_KEY=""                        # tskey-auth-... from Tailscale admin
 TAILSCALE_MODE="serve"                      # "serve" (tailnet-only) or "funnel" (public)
-
-# ─── Auto-migration: ~/.mustangclaw → ~/.openclaw ──────────────────────────
-if [[ -d "$HOME/.mustangclaw" && ! -d "$HOME/.openclaw" ]]; then
-    mv "$HOME/.mustangclaw" "$HOME/.openclaw"
-    [[ -t 1 ]] && printf '\033[0;32m[INFO]\033[0m Migrated config: ~/.mustangclaw -> ~/.openclaw\n'
-fi
 
 # ─── User Overrides (written by mustangclaw init) ─────────────────────────
 if [[ -f "$OPENCLAW_CONFIG_DIR/config.env" ]]; then

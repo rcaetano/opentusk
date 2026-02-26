@@ -10,18 +10,18 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Upgrade MustangClaw by pulling the latest code and rebuilding the Docker image.
-Remote ~/.openclaw is never overwritten if it exists; seeded from local if absent.
+Remote upgrade uses the marketplace updater for OpenClaw and rsyncs Poseidon.
 
 Options:
   --target TARGET   "local" (default) or "remote"
   --ip IP           Droplet IP for remote target (auto-detected if omitted)
-  --rollback        Revert to previous git commit and rebuild
+  --rollback        Revert to previous git commit and rebuild (local only)
   --help            Show this help message
 
 Examples:
   $(basename "$0")                          # upgrade local
   $(basename "$0") --target remote          # upgrade droplet
-  $(basename "$0") --target remote --rollback  # revert remote to previous commit
+  $(basename "$0") --rollback               # revert local to previous commit
 EOF
     exit 0
 }
@@ -103,61 +103,49 @@ fi
 require_cmd ssh
 require_cmd rsync
 
+if [[ "$ROLLBACK" == "true" ]]; then
+    log_error "--rollback is only supported for local upgrades."
+    exit 1
+fi
+
 if [[ -z "$IP" ]]; then
     require_cmd doctl "doctl is required to auto-detect droplet IP. Install it or use --ip."
     IP=$(get_droplet_ip)
 fi
 
-if [[ "$ROLLBACK" == "true" ]]; then
-    log_warn "Rolling back remote to previous commit..."
+log_info "Upgrading remote at $IP..."
+
+# 1. Update OpenClaw via marketplace updater
+log_info "Updating OpenClaw on remote..."
+ssh "${DO_SSH_USER}@${IP}" bash <<'OCUPDATE'
+set -euo pipefail
+if [[ -x /opt/update-openclaw.sh ]]; then
+    /opt/update-openclaw.sh
 else
-    log_info "Upgrading remote at $IP..."
+    echo "Marketplace updater not found — skipping OpenClaw update."
 fi
+systemctl restart openclaw
+OCUPDATE
 
-# Sync wrapper scripts to remote (excluding repos — they're handled separately)
-log_info "Syncing wrapper project to remote..."
-rsync -avz --progress -e "ssh" \
-    --exclude='openclaw/' --exclude='poseidon/' --exclude='.git/' \
-    --exclude='node_modules/' --exclude='.openclaw/' \
-    "$PROJECT_ROOT/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/"
-
-# Sync poseidon source to remote (private repo — can't git clone on remote)
+# 2. Rsync Poseidon source (private repo — can't git clone on remote)
 if [[ -d "$PROJECT_ROOT/poseidon" ]]; then
     log_info "Syncing Poseidon source to remote..."
     rsync -avz --progress -e "ssh" \
         --exclude='.git/' --exclude='node_modules/' --exclude='dist/' \
-        "$PROJECT_ROOT/poseidon/" "mustangclaw@${IP}:/home/mustangclaw/mustangclaw/poseidon/"
-fi
+        "$PROJECT_ROOT/poseidon/" "${DO_SSH_USER}@${IP}:${REMOTE_POSEIDON_DIR}/"
 
-# Auto-migrate remote ~/.mustangclaw → ~/.openclaw
-ssh "mustangclaw@${IP}" 'if [[ -d /home/mustangclaw/.mustangclaw && ! -d /home/mustangclaw/.openclaw ]]; then mv /home/mustangclaw/.mustangclaw /home/mustangclaw/.openclaw; echo "Migrated remote config: ~/.mustangclaw -> ~/.openclaw"; fi'
-
-# Seed remote config from local if it doesn't exist yet (NEVER overwrite existing)
-REMOTE_CONFIG_EXISTS=$(ssh "mustangclaw@${IP}" '[[ -d /home/mustangclaw/.openclaw ]] && echo yes || echo no')
-if [[ "$REMOTE_CONFIG_EXISTS" == "no" ]]; then
-    if [[ -d "$OPENCLAW_CONFIG_DIR" ]]; then
-        log_info "Remote ~/.openclaw not found — seeding from local config..."
-        rsync -avz --progress -e "ssh" \
-            "$OPENCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.openclaw/"
-    else
-        log_warn "Remote ~/.openclaw not found and no local config to seed."
-    fi
-else
-    log_info "Remote ~/.openclaw exists — preserving remote config (not overwriting)."
-fi
-
-# Run upgrade on remote: pull openclaw, rebuild images (poseidon uses rsynced source),
-# and restart with config patching via 'mustangclaw run'.
-ROLLBACK_FLAG=""
-if [[ "$ROLLBACK" == "true" ]]; then
-    ROLLBACK_FLAG="--rollback"
-fi
-
-ssh "mustangclaw@${IP}" bash <<EOF
+    # 3. Rebuild Poseidon + restart
+    log_info "Rebuilding Poseidon on remote..."
+    ssh "${DO_SSH_USER}@${IP}" bash <<POSBUILD
 set -euo pipefail
-cd /home/mustangclaw/mustangclaw
-chmod +x mustangclaw
-./mustangclaw upgrade $ROLLBACK_FLAG
-EOF
+cd ${REMOTE_POSEIDON_DIR}
+pnpm install --frozen-lockfile
+pnpm --filter @poseidon/web build
+chown -R openclaw:openclaw ${REMOTE_POSEIDON_DIR}
+systemctl restart poseidon
+POSBUILD
+else
+    log_warn "Poseidon source not found locally — skipping Poseidon upgrade."
+fi
 
 log_info "Remote upgrade complete at $IP."

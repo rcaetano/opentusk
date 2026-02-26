@@ -93,22 +93,29 @@ if [[ "$DRY_RUN" == "true" ]]; then
     RSYNC_FLAGS+=(--dry-run)
 fi
 
-# Auto-migrate remote ~/.mustangclaw → ~/.openclaw
-ssh "mustangclaw@${IP}" 'if [[ -d /home/mustangclaw/.mustangclaw && ! -d /home/mustangclaw/.openclaw ]]; then mv /home/mustangclaw/.mustangclaw /home/mustangclaw/.openclaw; echo "Migrated remote config: ~/.mustangclaw -> ~/.openclaw"; fi'
-
-log_info "Syncing $OPENCLAW_CONFIG_DIR to mustangclaw@${IP}..."
+log_info "Syncing $OPENCLAW_CONFIG_DIR to ${DO_SSH_USER}@${IP}:${REMOTE_OPENCLAW_HOME}/.openclaw/..."
 rsync "${RSYNC_FLAGS[@]}" -e "ssh" \
-    "$OPENCLAW_CONFIG_DIR/" "mustangclaw@${IP}:/home/mustangclaw/.openclaw/"
+    "$OPENCLAW_CONFIG_DIR/" "${DO_SSH_USER}@${IP}:${REMOTE_OPENCLAW_HOME}/.openclaw/"
 
 if [[ "$DRY_RUN" == "true" ]]; then
-    log_info "[DRY RUN] Would chown and restart on remote."
+    log_info "[DRY RUN] Would chown, update poseidon.env, and restart services on remote."
     exit 0
 fi
 
-log_info "Fixing ownership and restarting gateway on remote..."
-ssh "mustangclaw@${IP}" '
-    sudo chown -R 1000:1000 /home/mustangclaw/.openclaw
-    docker restart mustangclaw
-'
+log_info "Fixing ownership and restarting services on remote..."
+# Read gateway token from local openclaw.json to update poseidon.env
+LOCAL_TOKEN=$(read_json_token "$OPENCLAW_CONFIG_DIR/openclaw.json")
+
+ssh "${DO_SSH_USER}@${IP}" bash <<REMOTESYNC
+set -euo pipefail
+chown -R openclaw:openclaw ${REMOTE_OPENCLAW_HOME}/.openclaw
+systemctl restart openclaw
+
+# Update Poseidon env with gateway token if poseidon.env exists
+if [[ -f /opt/poseidon.env && -n "${LOCAL_TOKEN}" ]]; then
+    sed -i "s|^GATEWAY_TOKEN=.*|GATEWAY_TOKEN=${LOCAL_TOKEN}|" /opt/poseidon.env
+    systemctl restart poseidon
+fi
+REMOTESYNC
 
 log_info "Config synced to remote droplet at $IP."

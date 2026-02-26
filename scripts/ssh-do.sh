@@ -52,8 +52,8 @@ if [[ "$TUNNEL" == "true" ]]; then
     exec ssh -L "${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
              -L "${BRIDGE_PORT}:localhost:${BRIDGE_PORT}" \
              -L "${POSEIDON_PORT}:localhost:${POSEIDON_PORT}" \
-             "mustangclaw@${IP}"
+             "${DO_SSH_USER}@${IP}"
 else
-    log_info "Connecting to mustangclaw@${IP}..."
-    exec ssh "mustangclaw@${IP}"
+    log_info "Connecting to ${DO_SSH_USER}@${IP}..."
+    exec ssh "${DO_SSH_USER}@${IP}"
 fi
