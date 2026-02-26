@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# config.sh — Shared variables and helper functions for MustangClaw scripts
+# config.sh — Shared variables and helper functions for OpenTusk scripts
 # This file is sourced by other scripts; do not execute directly.
 
 # ─── Ports (used in remote Tailscale serve checks) ─────────────────────────
@@ -7,12 +7,12 @@ GATEWAY_PORT=18789
 POSEIDON_PORT=18791
 
 # ─── DigitalOcean ────────────────────────────────────────────────────────────
-DO_DROPLET_NAME="mustangclaw"
+DO_DROPLET_NAME="opentusk"
 DO_REGION="fra1"
 DO_SIZE="s-2vcpu-4gb"
 DO_IMAGE="openclaw"                           # DO marketplace image
 DO_SSH_KEY_FINGERPRINT=""                     # auto-detected or set manually
-DO_TAG="mustangclaw"
+DO_TAG="opentusk"
 DO_SSH_USER="root"                            # marketplace convention
 
 # ─── Remote Paths ──────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ TAILSCALE_MODE="serve"                      # "serve" (tailnet-only) or "funnel"
 # ─── Resolve project root early (needed for config.env lookup) ────────────
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# ─── User Overrides (written by mustangclaw init) ─────────────────────────
+# ─── User Overrides (written by opentusk init) ────────────────────────────
 if [[ -f "$PROJECT_ROOT/config.env" ]]; then
     source "$PROJECT_ROOT/config.env"
 fi

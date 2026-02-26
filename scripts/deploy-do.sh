@@ -9,7 +9,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Create and provision an MustangClaw gateway on a DigitalOcean droplet
+Create and provision an OpenTusk gateway on a DigitalOcean droplet
 using the OpenClaw marketplace image.
 
 This script is idempotent — if the droplet already exists, it will skip creation.
@@ -215,7 +215,7 @@ if [[ "$FIRST_LOGIN_PENDING" == "yes" ]]; then
     log_warn "The droplet has a first-login setup wizard (AI provider selector)."
     log_warn "Open a new terminal and run:"
     echo ""
-    echo "  ./mustangclaw ssh"
+    echo "  ./opentusk ssh"
     echo ""
     log_warn "Complete the AI provider setup, then come back here."
     printf "${_CYAN}Press Enter once you've completed the setup...${_NC} "
@@ -302,7 +302,7 @@ fi
 CREDS_FILE="$HOME/.openclaw/remote-credentials"
 mkdir -p "$HOME/.openclaw"
 cat > "$CREDS_FILE" <<CREDEOF
-# MustangClaw remote deployment credentials
+# OpenTusk remote deployment credentials
 # Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
 # Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 GATEWAY_TOKEN=$GATEWAY_TOKEN
@@ -321,7 +321,7 @@ if [[ -n "${POSEIDON_REPO:-}" ]]; then
         SSH_P6=$((SSH_P6 + 5))
         if [[ $SSH_P6 -ge 60 ]]; then
             log_error "SSH not available before Poseidon deploy (waited 60s)."
-            log_error "Try again later: ./mustangclaw deploy"
+            log_error "Try again later: ./opentusk deploy"
             exit 1
         fi
         printf "."
@@ -346,7 +346,7 @@ BUNINSTALL
 set -euo pipefail
 KEY_FILE="/root/.ssh/poseidon_deploy_key"
 if [[ ! -f "$KEY_FILE" ]]; then
-    ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "mustangclaw-deploy" >/dev/null 2>&1
+    ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "opentusk-deploy" >/dev/null 2>&1
 fi
 
 # Configure SSH to use this key for github.com
@@ -372,7 +372,7 @@ DEPLOYKEY
 
     DEPLOY_KEY_ADDED=false
     if command -v gh &>/dev/null; then
-        KEY_TITLE="mustangclaw-${DO_DROPLET_NAME}"
+        KEY_TITLE="opentusk-${DO_DROPLET_NAME}"
         if gh api "repos/${REPO_PATH}/keys" --method POST \
             -f title="$KEY_TITLE" -f key="$DEPLOY_PUBKEY" -F read_only=true 2>/dev/null; then
             log_info "Deploy key added to ${REPO_PATH} via gh CLI."
@@ -427,7 +427,7 @@ PORT=${POSEIDON_PORT}
 GATEWAY_URL=ws://127.0.0.1:${GATEWAY_PORT}
 GATEWAY_TOKEN=${GATEWAY_TOKEN}
 POSEIDON_STATIC_DIR=${REMOTE_POSEIDON_DIR}/apps/web/dist
-OPENCLAW_SOURCE=mustangclaw
+OPENCLAW_SOURCE=opentusk
 ENVEOF
 chmod 600 /opt/poseidon.env
 

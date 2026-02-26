@@ -9,7 +9,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Sanity check of the MustangClaw setup: config, scripts, and remote droplet.
+Sanity check of the OpenTusk setup: config, scripts, and remote droplet.
 
 Options:
   --fix       Attempt to auto-fix common issues
@@ -71,7 +71,7 @@ if [[ -f "$PROJECT_ROOT/config.env" ]]; then
         warn "POSEIDON_REPO not set in config.env — Poseidon deploy will be skipped"
     fi
 else
-    fail "config.env missing — run 'mustangclaw init'"
+    fail "config.env missing — run 'opentusk init'"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -104,13 +104,13 @@ if [[ "$scripts_ok" == "true" ]]; then
     pass "All ${#REQUIRED_SCRIPTS[@]} required scripts present"
 fi
 
-if [[ -x "$PROJECT_ROOT/mustangclaw" ]]; then
-    pass "mustangclaw CLI is executable"
+if [[ -x "$PROJECT_ROOT/opentusk" ]]; then
+    pass "opentusk CLI is executable"
 else
-    fail "mustangclaw CLI not executable"
+    fail "opentusk CLI not executable"
     if [[ "$AUTO_FIX" == "true" ]]; then
-        chmod +x "$PROJECT_ROOT/mustangclaw"
-        fixed "Made mustangclaw executable"
+        chmod +x "$PROJECT_ROOT/opentusk"
+        fixed "Made opentusk executable"
     fi
 fi
 
@@ -203,7 +203,7 @@ else
                     fail "Deploy key missing (/root/.ssh/poseidon_deploy_key)"
                     if [[ "$AUTO_FIX" == "true" ]]; then
                         ssh "${DO_SSH_USER}@${DROPLET_IP}" \
-                            'ssh-keygen -t ed25519 -f /root/.ssh/poseidon_deploy_key -N "" -C "mustangclaw-deploy" >/dev/null 2>&1' 2>/dev/null \
+                            'ssh-keygen -t ed25519 -f /root/.ssh/poseidon_deploy_key -N "" -C "opentusk-deploy" >/dev/null 2>&1' 2>/dev/null \
                             && fixed "Generated deploy key on remote" \
                             || fail "Could not generate deploy key"
                         log_warn "Deploy key created but must be added to GitHub as a deploy key."

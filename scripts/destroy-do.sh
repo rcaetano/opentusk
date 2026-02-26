@@ -9,7 +9,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Destroy the MustangClaw DigitalOcean droplet.
+Destroy the OpenTusk DigitalOcean droplet.
 
 Options:
   --force     Skip confirmation prompt

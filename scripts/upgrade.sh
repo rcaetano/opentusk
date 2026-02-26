@@ -9,7 +9,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Upgrade the remote MustangClaw droplet. Uses the marketplace updater for
+Upgrade the remote OpenTusk droplet. Uses the marketplace updater for
 OpenClaw and pulls the latest Poseidon source via git on the remote.
 
 Options:

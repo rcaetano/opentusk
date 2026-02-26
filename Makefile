@@ -3,5 +3,5 @@
 # Run shellcheck on all shell scripts
 lint:
 	@echo "Running shellcheck..."
-	@shellcheck -x mustangclaw scripts/*.sh
+	@shellcheck -x opentusk scripts/*.sh
 	@echo "shellcheck passed."

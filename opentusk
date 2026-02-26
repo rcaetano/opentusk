@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── Resolve repo root ─────────────────────────────────────────────────────
+OPENTUSK_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+source "$OPENTUSK_ROOT/scripts/config.sh"
+
+# ─── Help ───────────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: opentusk <command> [options]
+
+Commands:
+  init      Configure OpenTusk (interactive wizard)      [--reset]
+  deploy    Create & provision DO droplet                   [--dry-run] [--force]
+  destroy   Tear down DO droplet                            [--force]
+  upgrade   Upgrade remote droplet                          [--ip IP] [--rollback]
+  ssh       SSH into droplet                                [--tunnel] [--ip IP]
+  audit     Sanity check of remote setup                    [--fix]
+
+Run 'opentusk <command> --help' for details on a specific command.
+EOF
+    exit 0
+}
+
+# ─── Dispatch ──────────────────────────────────────────────────────────────
+COMMAND="${1:-help}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    init)    exec "$OPENTUSK_ROOT/scripts/init.sh"        "$@" ;;
+    deploy)  exec "$OPENTUSK_ROOT/scripts/deploy-do.sh"   "$@" ;;
+    destroy) exec "$OPENTUSK_ROOT/scripts/destroy-do.sh"  "$@" ;;
+    upgrade) exec "$OPENTUSK_ROOT/scripts/upgrade.sh"     "$@" ;;
+    ssh)     exec "$OPENTUSK_ROOT/scripts/ssh-do.sh"      "$@" ;;
+    audit)   exec "$OPENTUSK_ROOT/scripts/audit.sh"       "$@" ;;
+    help|--help|-h) usage ;;
+    *)
+        log_error "Unknown command: $COMMAND"
+        echo ""
+        usage
+        ;;
+esac

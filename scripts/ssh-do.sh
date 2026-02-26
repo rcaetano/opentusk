@@ -9,10 +9,10 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-SSH into the MustangClaw DigitalOcean droplet.
+SSH into the OpenTusk DigitalOcean droplet.
 
 Options:
-  --tunnel    Forward gateway and bridge ports (18789, 18790) over SSH
+  --tunnel    Forward gateway and Poseidon ports ($GATEWAY_PORT, $POSEIDON_PORT) over SSH
   --ip IP     Connect to a specific IP instead of auto-detecting
   --help      Show this help message
 
@@ -47,10 +47,9 @@ fi
 
 # ─── Connect ─────────────────────────────────────────────────────────────────
 if [[ "$TUNNEL" == "true" ]]; then
-    log_info "Connecting with port forwarding (gateway: $GATEWAY_PORT, bridge: $BRIDGE_PORT, poseidon: $POSEIDON_PORT)..."
+    log_info "Connecting with port forwarding (gateway: $GATEWAY_PORT, poseidon: $POSEIDON_PORT)..."
     log_info "Open http://localhost:${GATEWAY_PORT} in your browser once connected."
     exec ssh -L "${GATEWAY_PORT}:localhost:${GATEWAY_PORT}" \
-             -L "${BRIDGE_PORT}:localhost:${BRIDGE_PORT}" \
              -L "${POSEIDON_PORT}:localhost:${POSEIDON_PORT}" \
              "${DO_SSH_USER}@${IP}"
 else
