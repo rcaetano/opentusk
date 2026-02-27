@@ -283,6 +283,9 @@ cat > "$OC_HOME/.openclaw/openclaw.json" <<JSONEOF
     "auth": {
       "mode": "token",
       "token": "$TOKEN"
+    },
+    "remote": {
+      "token": "$TOKEN"
     }
   }
 }
@@ -296,10 +299,26 @@ chmod 600 "$OC_HOME/.openclaw/config.env"
 chmod 600 "$OC_HOME/.openclaw/openclaw.json"
 
 chown -R openclaw:openclaw "$OC_HOME/.openclaw"
+
+# Symlink root's config to openclaw user so CLI commands run as root use the same config
+rm -rf /root/.openclaw
+ln -sfn "$OC_HOME/.openclaw" /root/.openclaw
+
 systemctl restart openclaw
 echo "OpenClaw configured and restarted."
 CONFIGURE
 fi
+
+# Save credentials early — if Poseidon or Tailscale phases fail, token is preserved
+CREDS_FILE="$HOME/.openclaw/remote-credentials"
+mkdir -p "$HOME/.openclaw"
+cat > "$CREDS_FILE" <<CREDEOF
+# OpenTusk remote deployment credentials
+# Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+GATEWAY_TOKEN=$GATEWAY_TOKEN
+CREDEOF
+chmod 600 "$CREDS_FILE"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 5: Deploy Poseidon
@@ -663,18 +682,8 @@ if [[ "$SMOKE_OK" != "true" ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 8: Save credentials + print summary
+# Phase 8: Summary
 # ═══════════════════════════════════════════════════════════════════════════════
-CREDS_FILE="$HOME/.openclaw/remote-credentials"
-mkdir -p "$HOME/.openclaw"
-cat > "$CREDS_FILE" <<CREDEOF
-# OpenTusk remote deployment credentials
-# Droplet: $DO_DROPLET_NAME ($DROPLET_IP)
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-GATEWAY_TOKEN=$GATEWAY_TOKEN
-CREDEOF
-chmod 600 "$CREDS_FILE"
-
 log_info "Deployment complete!"
 echo ""
 echo "  Droplet IP:  $DROPLET_IP"

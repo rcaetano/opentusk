@@ -74,10 +74,26 @@ fi
 
 # 2. Pull latest Poseidon source via git on the remote
 if [[ -n "${POSEIDON_REPO:-}" ]]; then
+    # Ensure bun + pnpm are present (mirrors deploy-do.sh)
+    log_info "Checking bun/pnpm on remote..."
+    remote_exec "$IP" <<'BUNCHECK'
+set -euo pipefail
+if ! command -v bun &>/dev/null; then
+    curl -fsSL https://bun.sh/install | bash
+    ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
+fi
+bun install -g pnpm
+ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
+echo "bun $(bun --version), pnpm $(pnpm --version)"
+BUNCHECK
+
     log_info "Pulling and rebuilding Poseidon on remote..."
-    remote_exec "$IP" bash -s "$REMOTE_POSEIDON_DIR" "$POSEIDON_BRANCH" <<'POSBUILD'
+    remote_exec "$IP" bash -s \
+        "$REMOTE_POSEIDON_DIR" "$POSEIDON_BRANCH" \
+        "$POSEIDON_PORT" "$GATEWAY_PORT" <<'POSBUILD'
 set -euo pipefail
 POS_DIR="$1"; POS_BRANCH="$2"
+POS_PORT="$3"; GW_PORT="$4"
 git config --global --add safe.directory "$POS_DIR" 2>/dev/null || true
 cd "$POS_DIR"
 git fetch origin
@@ -85,6 +101,46 @@ git reset --hard "origin/$POS_BRANCH"
 pnpm install --frozen-lockfile
 pnpm --filter @poseidon/web build
 chown -R openclaw:openclaw "$POS_DIR"
+
+# ── Sync poseidon.env ──
+if [[ -f /opt/poseidon.env ]]; then
+    GW_TOKEN=$(grep -oP '^GATEWAY_TOKEN=\K.*' /opt/poseidon.env || true)
+fi
+if [[ -n "${GW_TOKEN:-}" ]]; then
+    cat > /opt/poseidon.env <<ENVEOF
+PORT=$POS_PORT
+GATEWAY_URL=ws://127.0.0.1:$GW_PORT
+GATEWAY_TOKEN=$GW_TOKEN
+POSEIDON_STATIC_DIR=$POS_DIR/apps/web/dist
+OPENCLAW_SOURCE=opentusk
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+ENVEOF
+    chmod 600 /opt/poseidon.env
+    echo "poseidon.env synced."
+else
+    echo "WARNING: No GATEWAY_TOKEN in /opt/poseidon.env — skipping env sync."
+fi
+
+# ── Sync systemd unit ──
+cat > /etc/systemd/system/poseidon.service <<'UNITEOF'
+[Unit]
+Description=Poseidon Agent Dashboard
+After=openclaw.service
+
+[Service]
+Type=simple
+User=openclaw
+WorkingDirectory=/opt/poseidon
+EnvironmentFile=/opt/poseidon.env
+ExecStart=/usr/local/bin/bun apps/api/src/index.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+systemctl daemon-reload
+
 systemctl restart poseidon
 POSBUILD
 else
