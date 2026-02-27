@@ -147,7 +147,75 @@ else
     log_warn "POSEIDON_REPO not set — skipping Poseidon upgrade."
 fi
 
-# 3. Verify Tailscale serve (re-apply if missing)
+# 3. Sync webhook files (if enabled)
+if [[ "$WEBHOOK_ENABLED" == "true" && -n "${POSEIDON_REPO:-}" ]]; then
+    log_info "Syncing webhook files..."
+
+    scp "${SSH_BASE_OPTS[@]}" \
+        "$SCRIPT_DIR/files/poseidon-update.sh" \
+        "$SCRIPT_DIR/files/webhook.ts" \
+        "${DO_SSH_USER}@${IP}:/tmp/"
+
+    remote_exec "$IP" bash -s \
+        "$WEBHOOK_PORT" "$WEBHOOK_SECRET" \
+        "$REMOTE_POSEIDON_DIR" "$POSEIDON_BRANCH" \
+        "$GATEWAY_PORT" "$POSEIDON_PORT" "$REMOTE_OPENCLAW_HOME" <<'WHSYNC'
+set -euo pipefail
+WH_PORT="$1"; WH_SECRET="$2"
+POS_DIR="$3"; POS_BRANCH="$4"
+GW_PORT="$5"; POS_PORT="$6"; OC_HOME="$7"
+
+WH_DIR="/opt/poseidon-webhook"
+mkdir -p "$WH_DIR"
+
+mv /tmp/poseidon-update.sh "$WH_DIR/update.sh"
+mv /tmp/webhook.ts "$WH_DIR/webhook.ts"
+chmod +x "$WH_DIR/update.sh"
+
+# Sync webhook.env
+cat > "$WH_DIR/webhook.env" <<ENVEOF
+WEBHOOK_PORT=$WH_PORT
+WEBHOOK_SECRET=$WH_SECRET
+POSEIDON_DIR=$POS_DIR
+POSEIDON_BRANCH=$POS_BRANCH
+GATEWAY_PORT=$GW_PORT
+POSEIDON_PORT=$POS_PORT
+OPENCLAW_HOME=$OC_HOME
+ENVEOF
+chmod 600 "$WH_DIR/webhook.env"
+
+# Sync systemd unit
+cat > /etc/systemd/system/poseidon-webhook.service <<'UNITEOF'
+[Unit]
+Description=Poseidon Webhook Listener
+After=poseidon.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/poseidon-webhook
+EnvironmentFile=/opt/poseidon-webhook/webhook.env
+ExecStart=/usr/local/bin/bun webhook.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+systemctl daemon-reload
+
+# UFW rule (idempotent)
+if ! ufw status | grep -q "$WH_PORT/tcp"; then
+    ufw allow "$WH_PORT/tcp"
+fi
+
+systemctl restart poseidon-webhook
+echo "Webhook files synced and service restarted."
+WHSYNC
+
+    log_info "Webhook sync complete."
+fi
+
+# 4. Verify Tailscale serve (re-apply if missing)
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     log_info "Verifying Tailscale serve configuration..."
     SERVE_OK=$(remote_exec "$IP" bash -s "$POSEIDON_PORT" "$GATEWAY_PORT" <<'TSCHECK'

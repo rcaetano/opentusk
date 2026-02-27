@@ -116,12 +116,16 @@ EOF
     fi
     cat <<EOF
   Tailscale: $TAILSCALE_ENABLED (mode: $TAILSCALE_MODE)
+  Webhook:   $WEBHOOK_ENABLED (port: $WEBHOOK_PORT)
 
 Then provision via SSH (as $DO_SSH_USER):
   - Write OpenClaw config (openclaw.json with gateway token)
   - Restart openclaw systemd service
   - Deploy Poseidon (deploy key, git clone, install bun, build, systemd service)
 EOF
+    if [[ "$WEBHOOK_ENABLED" == "true" ]]; then
+        echo "  - Deploy webhook listener (port $WEBHOOK_PORT, HMAC-protected)"
+    fi
     if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         echo "  - Install Tailscale ($TAILSCALE_MODE mode)"
         echo "    Poseidon on HTTPS 443, Gateway on HTTPS 8443"
@@ -469,6 +473,88 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Phase 5b: Webhook (if enabled)
+# ═══════════════════════════════════════════════════════════════════════════════
+if [[ "$WEBHOOK_ENABLED" == "true" && -n "${POSEIDON_REPO:-}" ]]; then
+    if [[ -z "$WEBHOOK_SECRET" ]]; then
+        log_error "WEBHOOK_ENABLED=true but WEBHOOK_SECRET is empty."
+        log_error "Run 'opentusk init' to generate a webhook secret."
+        exit 1
+    fi
+
+    log_info "Deploying Poseidon webhook listener..."
+
+    # Upload webhook files
+    scp "${SSH_BASE_OPTS[@]}" \
+        "$SCRIPT_DIR/files/poseidon-update.sh" \
+        "$SCRIPT_DIR/files/webhook.ts" \
+        "${DO_SSH_USER}@${DROPLET_IP}:/tmp/"
+
+    remote_exec "$DROPLET_IP" bash -s \
+        "$WEBHOOK_PORT" "$WEBHOOK_SECRET" \
+        "$REMOTE_POSEIDON_DIR" "$POSEIDON_BRANCH" \
+        "$GATEWAY_PORT" "$POSEIDON_PORT" "$REMOTE_OPENCLAW_HOME" <<'WEBHOOK'
+set -euo pipefail
+WH_PORT="$1"; WH_SECRET="$2"
+POS_DIR="$3"; POS_BRANCH="$4"
+GW_PORT="$5"; POS_PORT="$6"; OC_HOME="$7"
+
+WH_DIR="/opt/poseidon-webhook"
+mkdir -p "$WH_DIR"
+
+# Move uploaded files into place
+mv /tmp/poseidon-update.sh "$WH_DIR/update.sh"
+mv /tmp/webhook.ts "$WH_DIR/webhook.ts"
+chmod +x "$WH_DIR/update.sh"
+
+# Write webhook.env
+cat > "$WH_DIR/webhook.env" <<ENVEOF
+WEBHOOK_PORT=$WH_PORT
+WEBHOOK_SECRET=$WH_SECRET
+POSEIDON_DIR=$POS_DIR
+POSEIDON_BRANCH=$POS_BRANCH
+GATEWAY_PORT=$GW_PORT
+POSEIDON_PORT=$POS_PORT
+OPENCLAW_HOME=$OC_HOME
+ENVEOF
+chmod 600 "$WH_DIR/webhook.env"
+
+# Systemd unit
+cat > /etc/systemd/system/poseidon-webhook.service <<'UNITEOF'
+[Unit]
+Description=Poseidon Webhook Listener
+After=poseidon.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/poseidon-webhook
+EnvironmentFile=/opt/poseidon-webhook/webhook.env
+ExecStart=/usr/local/bin/bun webhook.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+
+systemctl daemon-reload
+systemctl enable --now poseidon-webhook
+
+# UFW rule for webhook port
+if ! ufw status | grep -q "$WH_PORT/tcp"; then
+    ufw allow "$WH_PORT/tcp"
+    echo "UFW rule added for port $WH_PORT."
+else
+    echo "UFW rule for port $WH_PORT already exists."
+fi
+
+echo "Webhook listener deployed on port $WH_PORT."
+WEBHOOK
+
+    log_info "Webhook listener active on port $WEBHOOK_PORT."
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Phase 6: Tailscale (if enabled)
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
@@ -569,11 +655,11 @@ fi
 log_info "Running post-deploy smoke test..."
 
 SMOKE_OUTPUT=$(remote_exec "$DROPLET_IP" bash -s \
-    "${POSEIDON_REPO:+yes}" "$TAILSCALE_ENABLED" \
-    "$POSEIDON_PORT" "$GATEWAY_PORT" <<'SMOKETEST'
+    "${POSEIDON_REPO:+yes}" "$TAILSCALE_ENABLED" "$WEBHOOK_ENABLED" \
+    "$POSEIDON_PORT" "$GATEWAY_PORT" "$WEBHOOK_PORT" <<'SMOKETEST'
 # No set -e: collect all results even if individual checks fail
-HAS_POSEIDON="$1"; TS_ENABLED="$2"
-POS_PORT="$3"; GW_PORT="$4"
+HAS_POSEIDON="$1"; TS_ENABLED="$2"; WH_ENABLED="$3"
+POS_PORT="$4"; GW_PORT="$5"; WH_PORT="$6"
 
 # OpenClaw service
 oc_status=$(systemctl is-active openclaw 2>/dev/null || echo "unknown")
@@ -619,6 +705,12 @@ while [[ $gw_elapsed -lt 90 ]]; do
     gw_elapsed=$((gw_elapsed + 5))
 done
 echo "GATEWAY=${gw_ready}:${gw_elapsed}"
+
+# Webhook service
+if [[ "$WH_ENABLED" == "true" ]]; then
+    wh_status=$(systemctl is-active poseidon-webhook 2>/dev/null || echo "unknown")
+    echo "WEBHOOK=$wh_status"
+fi
 SMOKETEST
 )
 
@@ -677,6 +769,16 @@ else
     log_warn "  Gateway port ${GATEWAY_PORT}: not responding after 90s — may need more time"
 fi
 
+wh_val=$(echo "$SMOKE_OUTPUT" | grep "^WEBHOOK=" | cut -d= -f2- || true)
+if [[ -n "$wh_val" ]]; then
+    if [[ "$wh_val" == "active" ]]; then
+        log_info "  Webhook service: active (port $WEBHOOK_PORT)"
+    else
+        log_error "  Webhook service: $wh_val"
+        SMOKE_OK=false
+    fi
+fi
+
 if [[ "$SMOKE_OK" != "true" ]]; then
     log_error "Smoke test failed. Check: ssh ${DO_SSH_USER}@${DROPLET_IP}"
 fi
@@ -703,6 +805,16 @@ if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
         echo "  Poseidon:    https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net"
         echo "  Gateway:     https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net:8443"
     fi
+    echo ""
+fi
+if [[ "$WEBHOOK_ENABLED" == "true" ]]; then
+    echo "  Webhook:     http://${DROPLET_IP}:${WEBHOOK_PORT}/webhook"
+    echo ""
+    echo "  Configure in your Poseidon repo (GitHub > Settings > Webhooks):"
+    echo "    URL:          http://${DROPLET_IP}:${WEBHOOK_PORT}/webhook"
+    echo "    Content type: application/json"
+    echo "    Secret:       ${WEBHOOK_SECRET:0:8}... (from config.env)"
+    echo "    Events:       Just the push event"
     echo ""
 fi
 log_warn "Full credentials stored in $CREDS_FILE (chmod 600)."

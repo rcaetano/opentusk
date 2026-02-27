@@ -24,6 +24,11 @@ REMOTE_POSEIDON_DIR="/opt/poseidon"           # where Poseidon is deployed
 POSEIDON_REPO="git@github.com:rcaetano/poseidon.git"
 POSEIDON_BRANCH="main"
 
+# ─── Webhook (optional) ────────────────────────────────────────────────────
+WEBHOOK_ENABLED=false
+WEBHOOK_PORT=18792
+WEBHOOK_SECRET=""                          # HMAC secret shared with GitHub
+
 # ─── Tailscale (optional) ───────────────────────────────────────────────────
 TAILSCALE_ENABLED=false
 TAILSCALE_AUTH_KEY=""                        # tskey-auth-... from Tailscale admin

@@ -47,6 +47,16 @@ The remote upgrade uses the marketplace updater for OpenClaw and pulls the lates
 ./opentusk audit --fix   # attempt to auto-fix common issues
 ```
 
+## Webhook (Auto-update)
+
+`opentusk init` optionally configures a GitHub webhook that automatically rebuilds Poseidon on pushes to `main`. When enabled, the deploy installs a bun HTTP server on the droplet (port 18792) that validates GitHub's HMAC signature and triggers a rebuild.
+
+After deploy, add the webhook in your Poseidon repo (GitHub > Settings > Webhooks):
+- **URL**: `http://<droplet-ip>:18792/webhook`
+- **Content type**: `application/json`
+- **Secret**: the `WEBHOOK_SECRET` from `config.env`
+- **Events**: Just the push event
+
 ## Tailscale
 
 `opentusk init` optionally configures Tailscale for remote access. When enabled, the deploy script installs Tailscale on the droplet and exposes services via HTTPS:
@@ -74,6 +84,8 @@ Key variables:
 | `TAILSCALE_ENABLED` | Enable Tailscale on deploy | `false` |
 | `TAILSCALE_AUTH_KEY` | Reusable auth key | — |
 | `TAILSCALE_MODE` | `serve` (tailnet) or `funnel` (public) | `serve` |
+| `WEBHOOK_ENABLED` | Enable auto-update webhook | `false` |
+| `WEBHOOK_SECRET` | HMAC secret shared with GitHub | — |
 
 ## License
 

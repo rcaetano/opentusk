@@ -146,8 +146,10 @@ else
             # Gather all remote state in a single SSH session
             REMOTE_STATE=$(remote_exec "$DROPLET_IP" bash -s \
                 "$REMOTE_OPENCLAW_HOME" "$REMOTE_POSEIDON_DIR" \
-                "${POSEIDON_REPO:-}" "$POSEIDON_PORT" "$GATEWAY_PORT" <<'AUDIT_GATHER'
+                "${POSEIDON_REPO:-}" "$POSEIDON_PORT" "$GATEWAY_PORT" \
+                "$WEBHOOK_ENABLED" "$WEBHOOK_PORT" <<'AUDIT_GATHER'
 OC_HOME="$1"; POS_DIR="$2"; POS_REPO="$3"; POS_PORT="$4"; GW_PORT="$5"
+WH_ENABLED="$6"; WH_PORT="$7"
 
 # Services
 echo "OC_STATUS=$(systemctl is-active openclaw 2>/dev/null || echo unknown)"
@@ -203,6 +205,26 @@ echo "CORS_ORIGINS=$(grep '^CORS_ORIGINS=' /opt/poseidon.env 2>/dev/null | cut -
 # Gateway controlUi.allowedOrigins
 gw_origins=$(python3 -c "import json; print(','.join(json.load(open('${OC_HOME}/.openclaw/openclaw.json')).get('gateway',{}).get('controlUi',{}).get('allowedOrigins',[])))" 2>/dev/null || true)
 echo "GW_ALLOWED_ORIGINS=$gw_origins"
+
+# Webhook
+if [[ "$WH_ENABLED" == "true" ]]; then
+    echo "WH_SERVICE=$(systemctl is-active poseidon-webhook 2>/dev/null || echo unknown)"
+    if [[ -f /opt/poseidon-webhook/webhook.ts ]]; then
+        echo "WH_FILE=yes"
+    else
+        echo "WH_FILE=no"
+    fi
+    if ufw status | grep -q "$WH_PORT/tcp"; then
+        echo "WH_UFW=yes"
+    else
+        echo "WH_UFW=no"
+    fi
+    if curl -sf -o /dev/null "http://localhost:${WH_PORT}" 2>/dev/null; then
+        echo "WH_PORT_OPEN=yes"
+    else
+        echo "WH_PORT_OPEN=no"
+    fi
+fi
 
 # Tailscale
 if command -v tailscale &>/dev/null; then
@@ -419,6 +441,46 @@ FIXSSHCONF
                         && fixed "Enabled UFW firewall (SSH + Tailscale only)" \
                         || fail "Could not enable UFW firewall"
                 fi
+            fi
+
+            # ── Webhook ──
+            if [[ "$WEBHOOK_ENABLED" == "true" ]]; then
+                wh_service=$(get_val WH_SERVICE)
+                if [[ "$wh_service" == "active" ]]; then
+                    pass "Webhook service: active"
+                else
+                    fail "Webhook service: ${wh_service:-not found}"
+                    if [[ "$AUTO_FIX" == "true" ]]; then
+                        remote_exec "$DROPLET_IP" 'systemctl restart poseidon-webhook && sleep 2 && systemctl is-active poseidon-webhook' 2>/dev/null \
+                            && fixed "Restarted webhook service" \
+                            || fail "Could not restart webhook service"
+                    fi
+                fi
+
+                if [[ "$(get_val WH_FILE)" == "yes" ]]; then
+                    pass "Webhook script exists (/opt/poseidon-webhook/webhook.ts)"
+                else
+                    fail "Webhook script missing (/opt/poseidon-webhook/webhook.ts)"
+                fi
+
+                if [[ "$(get_val WH_UFW)" == "yes" ]]; then
+                    pass "UFW rule exists for webhook port $WEBHOOK_PORT"
+                else
+                    fail "UFW rule missing for webhook port $WEBHOOK_PORT"
+                    if [[ "$AUTO_FIX" == "true" ]]; then
+                        remote_exec "$DROPLET_IP" "ufw allow ${WEBHOOK_PORT}/tcp" 2>/dev/null \
+                            && fixed "Added UFW rule for webhook port $WEBHOOK_PORT" \
+                            || fail "Could not add UFW rule for webhook port"
+                    fi
+                fi
+
+                if [[ "$(get_val WH_PORT_OPEN)" == "yes" ]]; then
+                    pass "Webhook port $WEBHOOK_PORT reachable on localhost"
+                else
+                    warn "Webhook port $WEBHOOK_PORT not reachable (may return 404 on GET — this is OK)"
+                fi
+            else
+                skip "Webhook checks (WEBHOOK_ENABLED=false)"
             fi
 
             # ── CORS_ORIGINS ──
