@@ -194,6 +194,16 @@ else
     echo "POS_REMOTE="
 fi
 
+# UFW
+echo "UFW_STATUS=$(ufw status | head -1 2>/dev/null || echo unknown)"
+
+# CORS_ORIGINS from poseidon.env
+echo "CORS_ORIGINS=$(grep '^CORS_ORIGINS=' /opt/poseidon.env 2>/dev/null | cut -d= -f2- || true)"
+
+# Gateway controlUi.allowedOrigins
+gw_origins=$(python3 -c "import json; print(','.join(json.load(open('${OC_HOME}/.openclaw/openclaw.json')).get('gateway',{}).get('controlUi',{}).get('allowedOrigins',[])))" 2>/dev/null || true)
+echo "GW_ALLOWED_ORIGINS=$gw_origins"
+
 # Tailscale
 if command -v tailscale &>/dev/null; then
     echo "TS_INSTALLED=yes"
@@ -395,6 +405,75 @@ FIXSSHCONF
                 fi
             else
                 skip "Tailscale checks (TAILSCALE_ENABLED=false)"
+            fi
+
+            # ── UFW firewall ──
+            ufw_status=$(get_val UFW_STATUS)
+            if echo "$ufw_status" | grep -q "active"; then
+                pass "UFW firewall: active"
+            else
+                fail "UFW firewall: ${ufw_status:-not active}"
+                if [[ "$AUTO_FIX" == "true" ]]; then
+                    remote_exec "$DROPLET_IP" \
+                        'ufw default deny incoming && ufw default allow outgoing && ufw allow 22/tcp && ufw allow 41641/udp && ufw --force enable' 2>/dev/null \
+                        && fixed "Enabled UFW firewall (SSH + Tailscale only)" \
+                        || fail "Could not enable UFW firewall"
+                fi
+            fi
+
+            # ── CORS_ORIGINS ──
+            cors_val=$(get_val CORS_ORIGINS)
+            ts_fqdn=$(get_val TS_FQDN)
+            if [[ -z "$cors_val" ]]; then
+                fail "CORS_ORIGINS not set in /opt/poseidon.env"
+                if [[ "$AUTO_FIX" == "true" && -n "$ts_fqdn" ]]; then
+                    remote_exec "$DROPLET_IP" \
+                        "echo 'CORS_ORIGINS=https://${ts_fqdn},http://localhost:5173,http://127.0.0.1:5173' >> /opt/poseidon.env && systemctl restart poseidon" 2>/dev/null \
+                        && fixed "Added CORS_ORIGINS with Tailscale FQDN" \
+                        || fail "Could not add CORS_ORIGINS"
+                fi
+            elif [[ -n "$ts_fqdn" ]] && echo "$cors_val" | grep -q "$ts_fqdn"; then
+                pass "CORS_ORIGINS includes Tailscale FQDN ($ts_fqdn)"
+            elif [[ -n "$ts_fqdn" ]]; then
+                warn "CORS_ORIGINS missing Tailscale FQDN ($ts_fqdn)"
+                if [[ "$AUTO_FIX" == "true" ]]; then
+                    remote_exec "$DROPLET_IP" \
+                        "sed -i 's|^CORS_ORIGINS=.*|CORS_ORIGINS=https://${ts_fqdn},http://localhost:5173,http://127.0.0.1:5173|' /opt/poseidon.env && systemctl restart poseidon" 2>/dev/null \
+                        && fixed "Updated CORS_ORIGINS with Tailscale FQDN" \
+                        || fail "Could not update CORS_ORIGINS"
+                fi
+            else
+                pass "CORS_ORIGINS is set (no Tailscale FQDN to verify against)"
+            fi
+
+            # ── Gateway allowedOrigins ──
+            gw_origins=$(get_val GW_ALLOWED_ORIGINS)
+            if [[ -n "$ts_fqdn" ]] && echo "$gw_origins" | grep -q "$ts_fqdn"; then
+                pass "Gateway allowedOrigins includes Tailscale FQDN ($ts_fqdn)"
+            elif [[ -n "$ts_fqdn" ]]; then
+                warn "Gateway allowedOrigins missing Tailscale FQDN ($ts_fqdn)"
+                if [[ "$AUTO_FIX" == "true" ]]; then
+                    remote_exec "$DROPLET_IP" bash -s "$REMOTE_OPENCLAW_HOME" "$ts_fqdn" <<'FIXGWORIGINS'
+set -euo pipefail
+OC_CONFIG="$1/.openclaw/openclaw.json"
+TS_FQDN="$2"
+python3 -c "
+import json
+with open('$OC_CONFIG') as f:
+    cfg = json.load(f)
+origins = cfg.setdefault('gateway', {}).setdefault('controlUi', {}).setdefault('allowedOrigins', [])
+for o in ['https://${TS_FQDN}', 'https://${TS_FQDN}:8443']:
+    if o not in origins:
+        origins.append(o)
+with open('$OC_CONFIG', 'w') as f:
+    json.dump(cfg, f, indent=2)
+"
+chown openclaw:openclaw "$OC_CONFIG"
+systemctl restart openclaw
+FIXGWORIGINS
+                    fixed "Updated gateway allowedOrigins with Tailscale FQDN" \
+                        || fail "Could not update gateway allowedOrigins"
+                fi
             fi
         else
             fail "Cannot SSH to ${DO_SSH_USER}@${DROPLET_IP}"

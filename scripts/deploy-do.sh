@@ -228,6 +228,18 @@ else
     echo "Swap enabled: $(swapon --show)"
 fi
 
+# ── UFW firewall ──
+if ! ufw status | grep -q "Status: active"; then
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw allow 22/tcp
+    ufw allow 41641/udp   # Tailscale WireGuard direct connections
+    ufw --force enable
+    echo "UFW firewall enabled (SSH + Tailscale only)."
+else
+    echo "UFW already active — skipping."
+fi
+
 # ── Clean up first-login scripts ──
 rm -rf /etc/update-motd.d/99-one-click
 for f in /etc/profile.d/*one-click* /etc/profile.d/*first-login* /etc/profile.d/*setup*; do
@@ -405,6 +417,7 @@ GATEWAY_URL=ws://127.0.0.1:$GW_PORT
 GATEWAY_TOKEN=$GW_TOKEN
 POSEIDON_STATIC_DIR=$POS_DIR/apps/web/dist
 OPENCLAW_SOURCE=opentusk
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ENVEOF
 chmod 600 /opt/poseidon.env
 
@@ -485,6 +498,49 @@ else
     fi
 fi
 TAILSCALE
+
+    # Resolve Tailscale FQDN and update CORS_ORIGINS in poseidon.env
+    log_info "Resolving Tailscale FQDN for CORS..."
+    TS_FQDN=$(remote_exec "$DROPLET_IP" bash -s "$REMOTE_OPENCLAW_HOME" <<'TSFQDN'
+set -euo pipefail
+OC_HOME="$1"
+ts_fqdn=$(tailscale status --self --json | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
+echo "$ts_fqdn"
+if [[ -n "$ts_fqdn" ]]; then
+    # Update Poseidon CORS_ORIGINS
+    sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=https://${ts_fqdn},http://localhost:5173,http://127.0.0.1:5173|" /opt/poseidon.env
+    systemctl restart poseidon
+    echo "Updated CORS_ORIGINS with https://${ts_fqdn}" >&2
+
+    # Update Gateway controlUi.allowedOrigins
+    OC_CONFIG="${OC_HOME}/.openclaw/openclaw.json"
+    if [[ -f "$OC_CONFIG" ]]; then
+        python3 -c "
+import json
+with open('$OC_CONFIG') as f:
+    cfg = json.load(f)
+origins = cfg.setdefault('gateway', {}).setdefault('controlUi', {}).setdefault('allowedOrigins', [])
+for o in ['https://${ts_fqdn}', 'https://${ts_fqdn}:8443']:
+    if o not in origins:
+        origins.append(o)
+with open('$OC_CONFIG', 'w') as f:
+    json.dump(cfg, f, indent=2)
+"
+        chown openclaw:openclaw "$OC_CONFIG"
+        systemctl restart openclaw
+        echo "Updated gateway allowedOrigins with https://${ts_fqdn}" >&2
+    fi
+fi
+TSFQDN
+    )
+    # First line of output is the FQDN
+    TS_FQDN=$(echo "$TS_FQDN" | head -1)
+    if [[ -n "$TS_FQDN" ]]; then
+        log_info "Tailscale FQDN: $TS_FQDN"
+    else
+        log_warn "Could not resolve Tailscale FQDN — CORS_ORIGINS not updated."
+    fi
+
     log_info "Tailscale configured ($TAILSCALE_MODE mode)."
 fi
 
@@ -528,6 +584,9 @@ if [[ "$TS_ENABLED" == "true" ]]; then
         fi
     fi
 fi
+
+# UFW
+echo "UFW=$(ufw status | head -1)"
 
 # Gateway port (poll up to 90s)
 gw_ready=false
@@ -583,6 +642,13 @@ if [[ -n "$ts_val" ]]; then
     esac
 fi
 
+ufw_val=$(echo "$SMOKE_OUTPUT" | grep "^UFW=" | cut -d= -f2- || true)
+if echo "$ufw_val" | grep -q "active"; then
+    log_info "  UFW firewall: active"
+else
+    log_warn "  UFW firewall: $ufw_val"
+fi
+
 gw_val=$(echo "$SMOKE_OUTPUT" | grep "^GATEWAY=" | cut -d= -f2- || true)
 gw_ready="${gw_val%%:*}"
 gw_elapsed="${gw_val##*:}"
@@ -621,8 +687,13 @@ echo "  Gateway token:    ${GATEWAY_TOKEN:0:8}..."
 echo ""
 if [[ "$TAILSCALE_ENABLED" == "true" ]]; then
     echo "  Tailscale:   $TAILSCALE_MODE mode"
-    echo "  Poseidon:    https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net"
-    echo "  Gateway:     https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net:8443"
+    if [[ -n "${TS_FQDN:-}" ]]; then
+        echo "  Dashboard:   https://${TS_FQDN}"
+        echo "  Gateway:     https://${TS_FQDN}:8443"
+    else
+        echo "  Poseidon:    https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net"
+        echo "  Gateway:     https://${DO_DROPLET_NAME}.<your-tailnet>.ts.net:8443"
+    fi
     echo ""
 fi
 log_warn "Full credentials stored in $CREDS_FILE (chmod 600)."

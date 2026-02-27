@@ -127,6 +127,45 @@ TSFIX
     else
         log_info "Tailscale serve OK."
     fi
+
+    # Refresh CORS_ORIGINS + gateway allowedOrigins with current Tailscale FQDN
+    log_info "Refreshing origins with current Tailscale FQDN..."
+    remote_exec "$IP" bash -s "$REMOTE_OPENCLAW_HOME" <<'CORSFIX'
+set -euo pipefail
+OC_HOME="$1"
+ts_fqdn=$(tailscale status --self --json | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
+if [[ -n "$ts_fqdn" ]]; then
+    # Poseidon CORS_ORIGINS
+    if grep -q "^CORS_ORIGINS=" /opt/poseidon.env 2>/dev/null; then
+        sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=https://${ts_fqdn},http://localhost:5173,http://127.0.0.1:5173|" /opt/poseidon.env
+    else
+        echo "CORS_ORIGINS=https://${ts_fqdn},http://localhost:5173,http://127.0.0.1:5173" >> /opt/poseidon.env
+    fi
+    systemctl restart poseidon
+    echo "CORS_ORIGINS updated with https://${ts_fqdn}"
+
+    # Gateway controlUi.allowedOrigins
+    OC_CONFIG="${OC_HOME}/.openclaw/openclaw.json"
+    if [[ -f "$OC_CONFIG" ]]; then
+        python3 -c "
+import json
+with open('$OC_CONFIG') as f:
+    cfg = json.load(f)
+origins = cfg.setdefault('gateway', {}).setdefault('controlUi', {}).setdefault('allowedOrigins', [])
+for o in ['https://${ts_fqdn}', 'https://${ts_fqdn}:8443']:
+    if o not in origins:
+        origins.append(o)
+with open('$OC_CONFIG', 'w') as f:
+    json.dump(cfg, f, indent=2)
+"
+        chown openclaw:openclaw "$OC_CONFIG"
+        systemctl restart openclaw
+        echo "Gateway allowedOrigins updated with https://${ts_fqdn}"
+    fi
+else
+    echo "Could not resolve Tailscale FQDN — origins unchanged."
+fi
+CORSFIX
 fi
 
 log_info "Remote upgrade complete at $IP."
