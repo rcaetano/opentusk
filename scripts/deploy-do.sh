@@ -241,7 +241,14 @@ if ! ufw status | grep -q "Status: active"; then
     ufw --force enable
     echo "UFW firewall enabled (SSH + Tailscale only)."
 else
-    echo "UFW already active — skipping."
+    # Replace SSH rate-limit with allow (marketplace image uses "ufw limit 22/tcp"
+    # which blocks rapid scripted connections)
+    if ufw status | grep -q "22/tcp.*LIMIT"; then
+        ufw delete limit 22/tcp 2>/dev/null || true
+        ufw allow 22/tcp
+        echo "UFW: replaced SSH rate-limit with allow."
+    fi
+    echo "UFW already active — OK."
 fi
 
 # ── Clean up first-login scripts ──
@@ -337,8 +344,10 @@ if ! command -v bun &>/dev/null; then
     curl -fsSL https://bun.sh/install | bash
     ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
 fi
-bun install -g pnpm
-ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
+if ! command -v pnpm &>/dev/null; then
+    bun install -g pnpm
+    ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
+fi
 echo "bun $(bun --version), pnpm $(pnpm --version)" >&2
 
 # ── Deploy key ──
@@ -397,14 +406,6 @@ BUNKEY
         printf "${_CYAN}Press Enter once the deploy key is added...${_NC} "
         read -r
     fi
-
-    # Verify SSH before the build session (bun install may cause sshd churn)
-    log_info "Verifying SSH connectivity..."
-    if ! wait_for_ssh "$DROPLET_IP" 60 "SSH (pre-build)"; then
-        log_error "SSH not available before Poseidon build. Try again: ./opentusk deploy"
-        exit 1
-    fi
-    echo ""
 
     # Clone/pull + build + systemd (single session)
     log_info "Cloning, building, and configuring Poseidon service..."
@@ -538,7 +539,10 @@ WantedBy=multi-user.target
 UNITEOF
 
 systemctl daemon-reload
-systemctl enable --now poseidon-webhook
+systemctl enable poseidon-webhook
+fuser -k "$WH_PORT/tcp" 2>/dev/null || true
+sleep 1
+systemctl restart poseidon-webhook
 
 # UFW rule for webhook port
 if ! ufw status | grep -q "$WH_PORT/tcp"; then

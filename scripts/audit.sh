@@ -437,7 +437,7 @@ FIXSSHCONF
                 fail "UFW firewall: ${ufw_status:-not active}"
                 if [[ "$AUTO_FIX" == "true" ]]; then
                     remote_exec "$DROPLET_IP" \
-                        'ufw default deny incoming && ufw default allow outgoing && ufw allow 22/tcp && ufw allow 41641/udp && ufw --force enable' 2>/dev/null \
+                        'ufw default deny incoming && ufw default allow outgoing && ufw delete limit 22/tcp 2>/dev/null; ufw allow 22/tcp && ufw allow 41641/udp && ufw --force enable' 2>/dev/null \
                         && fixed "Enabled UFW firewall (SSH + Tailscale only)" \
                         || fail "Could not enable UFW firewall"
                 fi

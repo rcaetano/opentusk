@@ -82,8 +82,10 @@ if ! command -v bun &>/dev/null; then
     curl -fsSL https://bun.sh/install | bash
     ln -sf "$HOME/.bun/bin/bun" /usr/local/bin/bun
 fi
-bun install -g pnpm
-ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
+if ! command -v pnpm &>/dev/null; then
+    bun install -g pnpm
+    ln -sf "$(bun pm bin -g)/pnpm" /usr/local/bin/pnpm 2>/dev/null || true
+fi
 echo "bun $(bun --version), pnpm $(pnpm --version)"
 BUNCHECK
 
