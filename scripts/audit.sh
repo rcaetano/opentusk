@@ -55,6 +55,7 @@ if [[ -f "$PROJECT_ROOT/config.env" ]]; then
     pass "config.env exists"
     # Check key variables
     source "$PROJECT_ROOT/config.env" 2>/dev/null || true
+    DO_SSH_KEY_FILE="${DO_SSH_KEY_FILE/#\~/$HOME}"
     if [[ -n "${DIGITALOCEAN_ACCESS_TOKEN:-}" ]]; then
         pass "DIGITALOCEAN_ACCESS_TOKEN is set"
     else
